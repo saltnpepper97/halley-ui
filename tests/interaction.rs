@@ -372,3 +372,41 @@ fn idle_pointer_movement_keeps_cached_layout_and_unknown_paste_does_not_consume_
     });
     assert_eq!(view.text_value("name"), Some("Correct"));
 }
+
+#[test]
+fn custom_button_content_keeps_full_row_activation_and_focus() {
+    use halley_ui::input::{InputEvent, Key, Modifiers, UiEvent};
+    use halley_ui::{ActionId, Button, Label, Rect, Row, TextSystem, Theme, UiView};
+    let mut view = UiView::new("custom").content(
+        Button::new("open", "")
+            .accessible_label("Open editor")
+            .action(ActionId::new("open-editor"))
+            .width(300.0)
+            .height(60.0)
+            .child(Row::new("content").child(Label::new("title", "Editor"))),
+    );
+    let mut text = TextSystem::new();
+    let prepared = view
+        .prepare(
+            Rect::new(0.0, 0.0, 300.0, 60.0),
+            &Theme::default(),
+            &mut text,
+        )
+        .unwrap();
+    assert_eq!(prepared.controls.len(), 1);
+    assert!(prepared.rects["title"].size.width > 0.0);
+    view.handle_event(InputEvent::WindowFocus(true));
+    view.handle_event(InputEvent::KeyDown {
+        key: Key::Tab,
+        modifiers: Modifiers::default(),
+    });
+    let events = view.handle_event(InputEvent::KeyDown {
+        key: Key::Enter,
+        modifiers: Modifiers::default(),
+    });
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, UiEvent::Activate(a) if a.0 == "open-editor"))
+    );
+}

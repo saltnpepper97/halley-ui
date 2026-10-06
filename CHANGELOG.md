@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Buttons can contain composed widgets while retaining full-row focus, activation, and accessibility semantics.
+- Added a custom-content guide and interaction regression test.
+
 ## 0.1.0
 
 Initial release of the Smithay-independent toolkit.

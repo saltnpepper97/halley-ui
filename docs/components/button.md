@@ -20,3 +20,7 @@ Disabled buttons are omitted from focus navigation and do not activate.
 `accessible_label` overrides the visible label as an accessible name when
 needed. `PreparedView::hit` remains available for hosts that already manage
 pointer dispatch; use one activation policy to avoid dispatching twice.
+
+Use `Button::new("open", "").accessible_label("Open item").child(row)` for a
+button containing an image, title, subtitle, or shortcut hint. Its children use
+Taffy layout, and the full button remains the activation target.

@@ -297,6 +297,11 @@ impl Button {
         widget.layout.padding = Insets::xy(12.0, 8.0);
         Self(widget)
     }
+    /// Use custom content while keeping the button's focus and activation behavior.
+    pub fn child(mut self, child: impl Into<Widget>) -> Self {
+        self.0.children.push(child.into());
+        self
+    }
     pub fn action(mut self, value: ActionId) -> Self {
         if let Kind::Button { action, .. } = &mut self.0.kind {
             *action = value;
