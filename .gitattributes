@@ -1,0 +1,2 @@
+# Preserve archived patches exactly, including context-line spaces.
+*.patch -whitespace

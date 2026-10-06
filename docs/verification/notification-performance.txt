@@ -1,0 +1,34 @@
+driver=amdgpu
+pixels_match=true
+trial=0 mode=legacy prepare_ns=556.57
+trial=0 mode=legacy render_p50_ns=73720 render_p95_ns=120501
+trial=0 mode=shared prepare_ns=592.03
+trial=0 mode=shared render_p50_ns=76660 render_p95_ns=125441
+trial=1 mode=shared prepare_ns=638.33
+trial=1 mode=shared render_p50_ns=71741 render_p95_ns=108430
+trial=1 mode=legacy prepare_ns=573.79
+trial=1 mode=legacy render_p50_ns=68580 render_p95_ns=119180
+trial=2 mode=legacy prepare_ns=569.86
+trial=2 mode=legacy render_p50_ns=73670 render_p95_ns=137790
+trial=2 mode=shared prepare_ns=654.77
+trial=2 mode=shared render_p50_ns=74940 render_p95_ns=118531
+trial=3 mode=shared prepare_ns=652.77
+trial=3 mode=shared render_p50_ns=72030 render_p95_ns=114530
+trial=3 mode=legacy prepare_ns=583.70
+trial=3 mode=legacy render_p50_ns=73240 render_p95_ns=95830
+trial=4 mode=legacy prepare_ns=602.14
+trial=4 mode=legacy render_p50_ns=73800 render_p95_ns=140741
+trial=4 mode=shared prepare_ns=723.85
+trial=4 mode=shared render_p50_ns=74660 render_p95_ns=120300
+trial=5 mode=shared prepare_ns=691.07
+trial=5 mode=shared render_p50_ns=68250 render_p95_ns=79601
+trial=5 mode=legacy prepare_ns=590.46
+trial=5 mode=legacy render_p50_ns=69910 render_p95_ns=102780
+trial=6 mode=legacy prepare_ns=582.50
+trial=6 mode=legacy render_p50_ns=68580 render_p95_ns=115531
+trial=6 mode=shared prepare_ns=593.89
+trial=6 mode=shared render_p50_ns=71600 render_p95_ns=98121
+trial=7 mode=shared prepare_ns=681.95
+trial=7 mode=shared render_p50_ns=75660 render_p95_ns=108671
+trial=7 mode=legacy prepare_ns=550.03
+trial=7 mode=legacy render_p50_ns=76090 render_p95_ns=104350

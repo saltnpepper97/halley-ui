@@ -1,0 +1,1660 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index d018ea1a..ad325233 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1152,13 +1152,13 @@ version = "0.7.0"
+ dependencies = [
+  "calloop",
+  "cgmath",
+- "cosmic-text",
+  "drm-ffi",
+  "eventline",
+  "futures-util",
+  "halley-config",
+  "halley-core",
+  "halley-ipc",
++ "halley-ui",
+  "image",
+  "libc",
+  "png 0.17.16",
+@@ -1249,6 +1249,19 @@ dependencies = [
+  "zbus",
+ ]
+ 
++[[package]]
++name = "halley-ui"
++version = "0.1.0"
++dependencies = [
++ "cosmic-text",
++ "image",
++ "resvg",
++ "smithay",
++ "taffy",
++ "thiserror 2.0.19",
++ "unicode-segmentation",
++]
++
+ [[package]]
+ name = "harfrust"
+ version = "0.5.2"
+@@ -3077,6 +3090,17 @@ dependencies = [
+  "version-compare",
+ ]
+ 
++[[package]]
++name = "taffy"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "639627c87f43b9181c811f40a6296409e093a17bc761214cba3c15df74f86b99"
++dependencies = [
++ "arrayvec",
++ "serde",
++ "slotmap",
++]
++
+ [[package]]
+ name = "target-lexicon"
+ version = "0.13.5"
+diff --git a/Cargo.toml b/Cargo.toml
+index f092847a..d67554fd 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -45,13 +45,13 @@ smithay = { version = "0.7.0", git = "https://github.com/Smithay/smithay.git", r
+ smithay-drm-extras = { git = "https://github.com/Smithay/smithay.git", rev = "79bbed5e1199090d787115614847a79c76607181" }
+ calloop = "0.14.4"
+ cgmath = "0.18"
+-cosmic-text = { version = "0.19", features = ["swash"] }
+ eventline = "0.9.0"
+ futures-util = { version = "0.3", optional = true }
+ drm-ffi = "0.9.1"
+ halley-config = { version = "0.7.0", path = "halley-config" }
+ halley-core = { version = "0.6.1", path = "halley-core" }
+ halley-ipc = { version = "0.6.1", path = "halley-ipc" }
++halley-ui = { path = "../halley-ecosystem/halley-ui", features = ["gles", "smithay-render-cache"] }
+ image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+ libc = "0.2"
+ png = "0.17"
+@@ -94,3 +94,6 @@ sha2 = "0.10"
+ # at opt-level 0 they dominate the profile of a dogfooded dev session.
+ [profile.dev.package."*"]
+ opt-level = 3
++
++[patch.crates-io]
++smithay = { git = "https://github.com/Smithay/smithay.git", rev = "79bbed5e1199090d787115614847a79c76607181" }
+diff --git a/src/render/node.rs b/src/render/node.rs
+index f9ffd25a..db9ff037 100644
+--- a/src/render/node.rs
++++ b/src/render/node.rs
+@@ -7,16 +7,16 @@ use smithay::backend::renderer::gles::{
+ };
+ use smithay::backend::renderer::utils::{CommitCounter, OpaqueRegions};
+ use smithay::backend::renderer::{ContextId, ImportMem, Renderer, Texture};
++#[cfg(test)]
++use smithay::utils::Size;
+ use smithay::utils::user_data::UserDataMap;
+-use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Size, Transform};
++use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Transform};
+ use std::collections::HashMap;
+ use std::error::Error;
+ use std::hash::{DefaultHasher, Hash, Hasher};
+ 
+ const SQUARE: &str = include_str!("shaders/node_square.frag");
+ const SQUIRCLE: &str = include_str!("shaders/node_squircle.frag");
+-const LABEL_SQUARE: &str = include_str!("shaders/ui_rect_square.frag");
+-const LABEL_ROUNDED: &str = include_str!("shaders/ui_rect_rounded.frag");
+ const FOCUS_RING: &str = include_str!("shaders/focus_ring.frag");
+ const DASHED_OUTLINE: &str = include_str!("shaders/dashed_outline.frag");
+ 
+@@ -61,19 +61,20 @@ fn ellipse_perimeter(rx: f32, ry: f32) -> f32 {
+     std::f32::consts::PI * (rx + ry) * (1.0 + (3.0 * h) / (10.0 + (4.0 - 3.0 * h).sqrt()))
+ }
+ 
++#[cfg(test)]
+ fn overlay_card_metrics(
+     size: Size<i32, Physical>,
+-    requested_content_radius: f32,
+-    requested_border_px: f32,
++    radius: f32,
++    border: f32,
+ ) -> super::window_decoration::Metrics {
+-    let border_px = requested_border_px
+-        .max(0.0)
+-        .min(size.w.min(size.h).max(0) as f32 * 0.5);
+-    let max_content_radius = (size.w.min(size.h).max(0) as f32 * 0.5 - border_px).max(0.0);
+-    super::window_decoration::metrics(
+-        requested_content_radius.max(0.0).min(max_content_radius),
+-        border_px,
+-    )
++    let shared = halley_ui::gles::card::card_metrics(size, radius, border);
++    super::window_decoration::Metrics {
++        content_radius: shared.content_radius,
++        border_width: shared.border_width,
++        outer_radius: shared.outer_radius,
++        inner_offset: shared.inner_offset,
++        inner_radius: shared.inner_radius,
++    }
+ }
+ 
+ fn finish_commit(hasher: DefaultHasher) -> CommitCounter {
+@@ -113,40 +114,6 @@ fn node_commit(shape: halley_config::NodeShape, style: NodeStyle) -> CommitCount
+ }
+ 
+ #[allow(clippy::too_many_arguments)]
+-fn label_commit(
+-    shape: halley_config::NodeShape,
+-    fill: (f32, f32, f32, f32),
+-    border: (f32, f32, f32, f32),
+-    destination: Rectangle<i32, Physical>,
+-    corner_radius: f32,
+-    inner_offset: f32,
+-    inner_corner_radius: f32,
+-    border_px: f32,
+-) -> CommitCounter {
+-    let mut hasher = DefaultHasher::new();
+-    shape_tag(shape).hash(&mut hasher);
+-    destination.size.w.hash(&mut hasher);
+-    destination.size.h.hash(&mut hasher);
+-    hash_floats(
+-        [
+-            fill.0,
+-            fill.1,
+-            fill.2,
+-            fill.3,
+-            border.0,
+-            border.1,
+-            border.2,
+-            border.3,
+-            corner_radius,
+-            inner_offset,
+-            inner_corner_radius,
+-            border_px,
+-        ],
+-        &mut hasher,
+-    );
+-    finish_commit(hasher)
+-}
+-
+ fn focus_ring_commit(
+     destination: Rectangle<i32, Physical>,
+     color: (f32, f32, f32, f32),
+@@ -200,8 +167,6 @@ struct Resources {
+     texture: GlesTexture,
+     square: GlesTexProgram,
+     squircle: GlesTexProgram,
+-    label_square: GlesTexProgram,
+-    label_rounded: GlesTexProgram,
+     focus_ring: GlesTexProgram,
+     dashed_outline: GlesTexProgram,
+ }
+@@ -209,6 +174,7 @@ struct Resources {
+ #[derive(Default)]
+ pub struct NodeRenderer {
+     resources: Option<Resources>,
++    cards: halley_ui::gles::CardRenderer,
+     icons: super::app_icon::AppIconCache,
+     selection_check: super::selection_check::SelectionCheckRenderer,
+     ids: super::ids::OutputElementIds<NodeSlot>,
+@@ -216,14 +182,7 @@ pub struct NodeRenderer {
+     occurrences: HashMap<u8, u32>,
+ }
+ 
+-#[derive(Clone, Copy, Debug)]
+-pub struct OverlayCardStyle {
+-    pub content_radius: f32,
+-    pub fill: (f32, f32, f32, f32),
+-    pub border: (f32, f32, f32, f32),
+-    pub border_px: f32,
+-    pub alpha: f32,
+-}
++pub use halley_ui::gles::{LabelRenderElement, OverlayCardStyle};
+ 
+ #[derive(Debug)]
+ pub struct NodeRenderElement {
+@@ -237,27 +196,6 @@ pub struct NodeRenderElement {
+     commit: CommitCounter,
+ }
+ 
+-#[derive(Debug)]
+-pub struct LabelRenderElement {
+-    base: TextureRenderElement<GlesTexture>,
+-    texture: GlesTexture,
+-    program: GlesTexProgram,
+-    fill: (f32, f32, f32, f32),
+-    border: (f32, f32, f32, f32),
+-    size: (f32, f32),
+-    corner_radius: f32,
+-    inner_offset: f32,
+-    inner_corner_radius: f32,
+-    border_px: f32,
+-    commit: CommitCounter,
+-}
+-
+-impl LabelRenderElement {
+-    pub fn corner_radius(&self) -> f32 {
+-        self.corner_radius
+-    }
+-}
+-
+ #[derive(Clone, Copy)]
+ pub struct NodeStyle {
+     pub border_rgb: (f32, f32, f32),
+@@ -510,55 +448,14 @@ impl NodeRenderer {
+         alpha: f32,
+     ) -> Result<LabelRenderElement, Box<dyn Error>> {
+         let id = self.dynamic_id(1);
+-        self.ensure_resources(renderer)?;
+-        let resources = self.resources.as_ref().expect("ensured above");
+-        let program = match shape {
+-            halley_config::NodeShape::Square => resources.label_square.clone(),
+-            halley_config::NodeShape::Squircle => resources.label_rounded.clone(),
+-        };
+-        let source = Rectangle::<f64, Logical>::new(
+-            (0.0, 0.0).into(),
+-            (
+-                resources.texture.size().w as f64,
+-                resources.texture.size().h as f64,
+-            )
+-                .into(),
+-        );
+-        let base = TextureRenderElement::from_static_texture(
++        self.cards.label_element(
++            renderer,
+             id,
+-            resources.context.clone(),
+-            destination.loc.to_f64(),
+-            resources.texture.clone(),
+-            1,
+-            Transform::Normal,
+-            Some(alpha.clamp(0.0, 1.0)),
+-            Some(source),
+-            Some(destination.size.to_logical(1)),
+-            None,
+-            Kind::Unspecified,
+-        );
+-        Ok(LabelRenderElement {
+-            base,
+-            texture: resources.texture.clone(),
+-            program,
+-            fill: (rgb.0, rgb.1, rgb.2, 1.0),
+-            border: (rgb.0, rgb.1, rgb.2, 1.0),
+-            size: (destination.size.w as f32, destination.size.h as f32),
+-            corner_radius: destination.size.h as f32 * 0.32,
+-            inner_offset: 0.0,
+-            inner_corner_radius: destination.size.h as f32 * 0.32,
+-            border_px: 0.0,
+-            commit: label_commit(
+-                shape,
+-                (rgb.0, rgb.1, rgb.2, 1.0),
+-                (rgb.0, rgb.1, rgb.2, 1.0),
+-                destination,
+-                destination.size.h as f32 * 0.32,
+-                0.0,
+-                destination.size.h as f32 * 0.32,
+-                0.0,
+-            ),
+-        })
++            destination,
++            shape == halley_config::NodeShape::Squircle,
++            rgb,
++            alpha,
++        )
+     }
+ 
+     pub fn overlay_card_element(
+@@ -568,61 +465,8 @@ impl NodeRenderer {
+         style: OverlayCardStyle,
+     ) -> Result<LabelRenderElement, Box<dyn Error>> {
+         let id = self.dynamic_id(2);
+-        self.ensure_resources(renderer)?;
+-        let resources = self.resources.as_ref().expect("ensured above");
+-        let metrics = overlay_card_metrics(destination.size, style.content_radius, style.border_px);
+-        let program = if metrics.content_radius > 0.0 {
+-            resources.label_rounded.clone()
+-        } else {
+-            resources.label_square.clone()
+-        };
+-        let source = Rectangle::<f64, Logical>::new(
+-            (0.0, 0.0).into(),
+-            (
+-                resources.texture.size().w as f64,
+-                resources.texture.size().h as f64,
+-            )
+-                .into(),
+-        );
+-        let base = TextureRenderElement::from_static_texture(
+-            id,
+-            resources.context.clone(),
+-            destination.loc.to_f64(),
+-            resources.texture.clone(),
+-            1,
+-            Transform::Normal,
+-            Some(style.alpha.clamp(0.0, 1.0)),
+-            Some(source),
+-            Some(destination.size.to_logical(1)),
+-            None,
+-            Kind::Unspecified,
+-        );
+-        Ok(LabelRenderElement {
+-            base,
+-            texture: resources.texture.clone(),
+-            program,
+-            fill: style.fill,
+-            border: style.border,
+-            size: (destination.size.w as f32, destination.size.h as f32),
+-            corner_radius: metrics.outer_radius,
+-            inner_offset: metrics.inner_offset,
+-            inner_corner_radius: metrics.inner_radius,
+-            border_px: metrics.border_width,
+-            commit: label_commit(
+-                if metrics.content_radius > 0.0 {
+-                    halley_config::NodeShape::Squircle
+-                } else {
+-                    halley_config::NodeShape::Square
+-                },
+-                style.fill,
+-                style.border,
+-                destination,
+-                metrics.outer_radius,
+-                metrics.inner_offset,
+-                metrics.inner_radius,
+-                metrics.border_width,
+-            ),
+-        })
++        self.cards
++            .overlay_card_element(renderer, id, destination, style)
+     }
+ 
+     /// One dashed focus ring, drawn by a single shader element.
+@@ -831,19 +675,6 @@ impl NodeRenderer {
+         ];
+         let square = renderer.compile_custom_texture_shader(SQUARE, &uniforms)?;
+         let squircle = renderer.compile_custom_texture_shader(SQUIRCLE, &uniforms)?;
+-        let label_uniforms = [
+-            UniformName::new("node_color", UniformType::_4f),
+-            UniformName::new("fill_color", UniformType::_4f),
+-            UniformName::new("rect_size", UniformType::_2f),
+-            UniformName::new("inner_rect_size", UniformType::_2f),
+-            UniformName::new("inner_rect_offset", UniformType::_2f),
+-            UniformName::new("corner_radius", UniformType::_1f),
+-            UniformName::new("inner_corner_radius", UniformType::_1f),
+-            UniformName::new("border_px", UniformType::_1f),
+-        ];
+-        let label_square = renderer.compile_custom_texture_shader(LABEL_SQUARE, &label_uniforms)?;
+-        let label_rounded =
+-            renderer.compile_custom_texture_shader(LABEL_ROUNDED, &label_uniforms)?;
+         let focus_ring = renderer.compile_custom_texture_shader(
+             FOCUS_RING,
+             &[
+@@ -870,8 +701,6 @@ impl NodeRenderer {
+             texture,
+             square,
+             squircle,
+-            label_square,
+-            label_rounded,
+             focus_ring,
+             dashed_outline,
+         });
+@@ -961,76 +790,6 @@ impl RenderElement<GlesRenderer> for NodeTextureElement {
+     }
+ }
+ 
+-impl Element for LabelRenderElement {
+-    fn id(&self) -> &Id {
+-        self.base.id()
+-    }
+-    fn current_commit(&self) -> CommitCounter {
+-        self.commit
+-    }
+-    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
+-        self.base.geometry(scale)
+-    }
+-    fn transform(&self) -> Transform {
+-        self.base.transform()
+-    }
+-    fn src(&self) -> Rectangle<f64, Buffer> {
+-        self.base.src()
+-    }
+-    fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+-        OpaqueRegions::default()
+-    }
+-    fn alpha(&self) -> f32 {
+-        self.base.alpha()
+-    }
+-    fn kind(&self) -> Kind {
+-        Kind::Unspecified
+-    }
+-}
+-
+-impl RenderElement<GlesRenderer> for LabelRenderElement {
+-    fn draw(
+-        &self,
+-        frame: &mut GlesFrame<'_, '_>,
+-        src: Rectangle<f64, Buffer>,
+-        dst: Rectangle<i32, Physical>,
+-        damage: &[Rectangle<i32, Physical>],
+-        opaque_regions: &[Rectangle<i32, Physical>],
+-        _cache: Option<&UserDataMap>,
+-    ) -> Result<(), GlesError> {
+-        frame.render_texture_from_to(
+-            &self.texture,
+-            src,
+-            dst,
+-            damage,
+-            opaque_regions,
+-            Transform::Normal,
+-            self.base.alpha(),
+-            Some(&self.program),
+-            &[
+-                Uniform::new("node_color", self.border),
+-                Uniform::new("fill_color", self.fill),
+-                Uniform::new("rect_size", self.size),
+-                Uniform::new(
+-                    "inner_rect_size",
+-                    (
+-                        (self.size.0 - self.inner_offset * 2.0).max(1.0),
+-                        (self.size.1 - self.inner_offset * 2.0).max(1.0),
+-                    ),
+-                ),
+-                Uniform::new("inner_rect_offset", (self.inner_offset, self.inner_offset)),
+-                Uniform::new("corner_radius", self.corner_radius),
+-                Uniform::new("inner_corner_radius", self.inner_corner_radius),
+-                Uniform::new("border_px", self.border_px),
+-            ],
+-        )
+-    }
+-
+-    fn underlying_storage(&self, _renderer: &mut GlesRenderer) -> Option<UnderlyingStorage<'_>> {
+-        None
+-    }
+-}
+-
+ impl RenderElement<GlesRenderer> for NodeRenderElement {
+     fn draw(
+         &self,
+diff --git a/src/render/overlays/shell.rs b/src/render/overlays/shell.rs
+index 5d23699a..30c5b50f 100644
+--- a/src/render/overlays/shell.rs
++++ b/src/render/overlays/shell.rs
+@@ -466,11 +466,15 @@ fn notification_elements(
+         color.bytes(),
+         max_text_width,
+     )?;
+-    let card =
+-        Rectangle::<i32, Physical>::new((0, 0).into(), (text_size.w + 32, text_size.h + 16).into());
++    let layout = ui_text.padded_label_layout(text_size)?;
++    let card_size: smithay::utils::Size<i32, Logical> = (
++        layout.card.width.round() as i32,
++        layout.card.height.round() as i32,
++    )
++        .into();
+     let card = crate::shell::screenshot::notification_rect(
+         Rectangle::<i32, Logical>::from_size(screen.size.to_logical(1)),
+-        card.size.to_logical(1),
++        card_size,
+         config,
+         notification.mix,
+     )
+@@ -478,8 +482,8 @@ fn notification_elements(
+     if let Some(text) = ui_text.element(
+         renderer,
+         (
+-            card.loc.x + 16,
+-            card.loc.y + (card.size.h - text_size.h) / 2,
++            card.loc.x + layout.label.origin.x.round() as i32,
++            card.loc.y + layout.label.origin.y.round() as i32,
+         )
+             .into(),
+         &message,
+diff --git a/src/render/scene/animation_pixels.rs b/src/render/scene/animation_pixels.rs
+index a88d5c3f..79c80807 100644
+--- a/src/render/scene/animation_pixels.rs
++++ b/src/render/scene/animation_pixels.rs
+@@ -3,6 +3,7 @@ use std::time::Duration;
+ use smithay::backend::allocator::Fourcc;
+ use smithay::backend::egl::{EGLContext, EGLDisplay, native::EGLSurfacelessDisplay};
+ use smithay::backend::renderer::damage::OutputDamageTracker;
++use smithay::backend::renderer::element::RenderElement;
+ use smithay::backend::renderer::gles::GlesTexture;
+ use smithay::backend::renderer::{Bind, Color32F, ExportMem, Offscreen, Texture};
+ use smithay::output::{Mode, PhysicalProperties, Subpixel};
+@@ -18,6 +19,124 @@ use crate::shell::overlay::{OverlayManager, OverlaySnapshot};
+ 
+ const SIZE: (i32, i32) = (641, 481);
+ 
++/// Explicit before/after extraction check on the same renderer/font installation.
++/// Record before changing a renderer, then compare using the same baseline file.
++#[test]
++#[ignore = "requires surfaceless GLES and HALLEY_UI_PARITY_BASELINE plus HALLEY_UI_PARITY_MODE=record|compare"]
++fn ui_library_migration_matches_recorded_frames() {
++    use halley_config::NotificationPosition::*;
++    use std::hash::{DefaultHasher, Hash, Hasher};
++    let baseline = std::env::var("HALLEY_UI_PARITY_BASELINE").expect("baseline path");
++    let mode = std::env::var("HALLEY_UI_PARITY_MODE").expect("record or compare");
++    assert!(matches!(mode.as_str(), "record" | "compare"));
++    let display = unsafe { EGLDisplay::new(EGLSurfacelessDisplay) }.unwrap();
++    let context = EGLContext::new(&display).unwrap();
++    let mut renderer = unsafe { GlesRenderer::new(context) }.unwrap();
++    let output = output("ui-extraction");
++    let mut target = renderer
++        .create_buffer(Fourcc::Abgr8888, SIZE.into())
++        .unwrap();
++    let mut fingerprints = String::new();
++    for font_size in [11, 18] {
++        for position in [
++            TopLeft,
++            TopCenter,
++            TopRight,
++            BottomLeft,
++            BottomCenter,
++            BottomRight,
++        ] {
++            for kind in ["notification", "screenshot", "zoom"] {
++                let config = halley_config::Overlays {
++                    notifications: halley_config::Notifications {
++                        position,
++                        offset_x: -12,
++                        offset_y: 16,
++                        ..Default::default()
++                    },
++                    zoom_indicator: halley_config::ZoomIndicator {
++                        position,
++                        hold_duration_ms: 500,
++                        ..Default::default()
++                    },
++                    ..Default::default()
++                };
++                let mut overlays = OverlayManager::default();
++                let mut resources = SceneResources::new();
++                resources.text.reload_font(&halley_config::Font {
++                    family: "monospace".into(),
++                    size: font_size,
++                });
++                match kind {
++                    "notification" => {
++                        overlays.show_config_error(output.name(), 500, Duration::ZERO)
++                    }
++                    "screenshot" => {
++                        let pixels = [30, 160, 210, 255].repeat(160 * 90);
++                        let buffer = smithay::backend::renderer::element::memory::MemoryRenderBuffer::from_slice(
++                            &pixels, Fourcc::Abgr8888, (160, 90), 1, Transform::Normal, None);
++                        overlays.show_screenshot_saved(
++                            output.name(),
++                            std::path::Path::new("/screenshots"),
++                            500,
++                            Duration::ZERO,
++                        );
++                        overlays.attach_screenshot_preview(Some(std::sync::Arc::new(
++                            crate::capture::preview::ScreenshotPreview {
++                                path: "/screenshots/test.png".into(),
++                                buffer,
++                                size: (160, 90),
++                                png: pixels.into(),
++                            },
++                        )));
++                    }
++                    _ => {
++                        overlays.show_zoom_indicator(
++                            &output.name(),
++                            0.75,
++                            &config.zoom_indicator,
++                            Duration::ZERO,
++                        );
++                    }
++                }
++                for millis in [0, 45, 90, 180, 500, 590, 700] {
++                    let snapshot = overlays.snapshot(&output.name(), Duration::from_millis(millis));
++                    let scene = resources.scene(&mut renderer, &output, snapshot, &config, None);
++                    let (pixels, _) = read_pixels(
++                        &mut renderer,
++                        &mut target,
++                        &mut OutputDamageTracker::new(SIZE, 1.0, Transform::Normal),
++                        &scene,
++                        0,
++                    );
++                    let mut hash = DefaultHasher::new();
++                    pixels.hash(&mut hash);
++                    fingerprints.push_str(&format!(
++                        "{font_size} {position:?} {kind} {millis} {:016x}\n",
++                        hash.finish()
++                    ));
++                }
++            }
++        }
++    }
++    if mode == "record" {
++        use std::io::Write;
++        std::fs::OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .open(baseline)
++            .expect("record requires a new baseline file; existing evidence is preserved")
++            .write_all(fingerprints.as_bytes())
++            .unwrap();
++    } else {
++        assert_eq!(
++            fingerprints,
++            std::fs::read_to_string(baseline).unwrap(),
++            "UI extraction changed rendered pixels"
++        );
++    }
++}
++
+ fn output(name: &str) -> Output {
+     let output = Output::new(
+         name.into(),
+@@ -148,11 +267,11 @@ impl SceneResources {
+     }
+ }
+ 
+-fn read_pixels(
++fn read_pixels<E: RenderElement<GlesRenderer>>(
+     renderer: &mut GlesRenderer,
+     target: &mut GlesTexture,
+     tracker: &mut OutputDamageTracker,
+-    scene: &[SceneElement],
++    scene: &[E],
+     age: usize,
+ ) -> (Vec<u8>, Vec<Rectangle<i32, Physical>>) {
+     let size = target.size();
+@@ -170,7 +289,7 @@ fn read_pixels(
+ 
+ #[test]
+ #[ignore = "requires surfaceless GLES; run with LIBGL_ALWAYS_SOFTWARE=1 and --ignored"]
+-fn local_animation_pixels_match_full_repaint_with_blur_shadows_and_reused_buffers() {
++fn conservative_animation_pixels_match_full_repaint_with_blur_shadows_and_reused_buffers() {
+     let display = unsafe { EGLDisplay::new(EGLSurfacelessDisplay) }.unwrap();
+     let context = EGLContext::new(&display).unwrap();
+     let mut renderer = unsafe { GlesRenderer::new(context) }.unwrap();
+@@ -215,22 +334,25 @@ fn local_animation_pixels_match_full_repaint_with_blur_shadows_and_reused_buffer
+                 .create_buffer(Fourcc::Abgr8888, SIZE.into())
+                 .unwrap();
+             let mut tracker = OutputDamageTracker::new(SIZE, 1.0, Transform::Normal);
+-            let mut saw_partial = false;
++            let mut saw_forced_full = false;
++            let mut saw_reused = false;
+             let mut saw_settled = false;
+             let mut saw_visible = false;
+-            let ticks = if case == "cluster-label" { 150 } else { 42 };
++            // Include enough settled frames to drain damage history for all buffer ages.
++            let ticks = if case == "cluster-label" { 160 } else { 42 };
+             for tick in 0..ticks {
+                 let now = Duration::from_millis(tick as u64 * 15);
+                 overlays.wakeup(now);
+                 let label_mix = (case == "cluster-label").then(|| {
+                     clusters.label_hover_mix(halley_core::cluster::ClusterId::new(1), tick < 90)
+                 });
+-                let demand = FrameDemand::new(
+-                    false,
+-                    overlays.animating_on_output("actual", now) || label_mix.is_some(),
+-                    false,
+-                );
+-                assert!(!demand.force_full_repaint);
++                let label_animating =
++                    label_mix.is_some_and(|mix| mix != if tick < 90 { 1.0 } else { 0.0 });
++                let local_animating =
++                    overlays.animating_on_output("actual", now) || label_animating;
++                let demand = FrameDemand::new(false, local_animating, false);
++                assert_eq!(demand.keep_redrawing, local_animating);
++                assert_eq!(demand.force_full_repaint, local_animating);
+                 let snapshot = overlays.snapshot("actual", now);
+                 let scene = actual_resources.scene(
+                     &mut renderer,
+@@ -242,16 +364,24 @@ fn local_animation_pixels_match_full_repaint_with_blur_shadows_and_reused_buffer
+                 saw_visible |= scene
+                     .iter()
+                     .any(|e| matches!(e, SceneElement::UiText(_)) && e.alpha() > 0.1);
+-                let age = if tick < buffers { 0 } else { buffers };
++                // Use the same upstream blur wrapper and age reset as both host backends.
++                let (prepared, blur) = crate::render::conservative::prepare(&scene);
++                let forced_full = demand.force_full_repaint || blur;
++                let age = if tick < buffers || forced_full {
++                    0
++                } else {
++                    buffers
++                };
++                saw_reused |= age == buffers;
+                 let (actual, damage) = read_pixels(
+                     &mut renderer,
+                     &mut targets[tick % buffers],
+                     &mut tracker,
+-                    &scene,
++                    &prepared,
+                     age,
+                 );
+-                // Separate effect caches prevent the reference repaint from
+-                // refreshing or repairing the incrementally rendered scene.
++                // Independent effect caches keep the always-full reference from
++                // refreshing or repairing the scene under test.
+                 let reference_scene = reference_resources.scene(
+                     &mut renderer,
+                     &reference_output,
+@@ -259,11 +389,13 @@ fn local_animation_pixels_match_full_repaint_with_blur_shadows_and_reused_buffer
+                     &config,
+                     label_mix,
+                 );
++                let (reference_prepared, _) =
++                    crate::render::conservative::prepare(&reference_scene);
+                 let (expected, _) = read_pixels(
+                     &mut renderer,
+                     &mut reference,
+                     &mut OutputDamageTracker::new(SIZE, 1.0, Transform::Normal),
+-                    &reference_scene,
++                    &reference_prepared,
+                     0,
+                 );
+                 let max_error = actual
+@@ -277,23 +409,28 @@ fn local_animation_pixels_match_full_repaint_with_blur_shadows_and_reused_buffer
+                     "case={case} buffers={buffers} tick={tick} max_error={max_error}"
+                 );
+                 if tick >= buffers {
+-                    assert!(
+-                        damage.iter().all(|r| r.size.w * r.size.h < SIZE.0 * SIZE.1),
+-                        "local {case} must not repaint the entire output"
+-                    );
+-                    saw_partial |= !damage.is_empty();
+-                    saw_settled |= damage.is_empty();
++                    if forced_full {
++                        assert!(
++                            damage
++                                .iter()
++                                .any(|r| r.size.w * r.size.h == SIZE.0 * SIZE.1),
++                            "animated/blurred {case} must repaint the entire output"
++                        );
++                        saw_forced_full = true;
++                    } else {
++                        saw_settled |= !demand.keep_redrawing && damage.is_empty();
++                    }
+                 }
+                 comparisons += 1;
+             }
+             assert!(
+-                saw_visible && saw_partial && saw_settled,
++                saw_visible && saw_forced_full && saw_reused && saw_settled,
+                 "case={case} buffers={buffers}"
+             );
+         }
+     }
+     eprintln!(
+-        "{comparisons} local-animation GLES comparisons passed, buffer ages 1-3, max permitted channel error=1/255"
++        "{comparisons} conservative-animation GLES comparisons passed, buffer ages 1-3, max permitted channel error=1/255"
+     );
+ }
+ 
+@@ -358,6 +495,8 @@ fn screenshot_preview_pixels_and_fade_match_full_repaint() {
+             for tick in 0..42 {
+                 let now = Duration::from_millis(tick as u64 * 15);
+                 overlays.wakeup(now);
++                let demand =
++                    FrameDemand::new(false, overlays.animating_on_output("actual", now), false);
+                 let snapshot = overlays.snapshot("actual", now);
+                 let scene = actual_resources.scene(
+                     &mut renderer,
+@@ -366,12 +505,17 @@ fn screenshot_preview_pixels_and_fade_match_full_repaint() {
+                     &config,
+                     None,
+                 );
+-                let age = if tick < buffers { 0 } else { buffers };
++                let (prepared, blur) = crate::render::conservative::prepare(&scene);
++                let age = if tick < buffers || demand.force_full_repaint || blur {
++                    0
++                } else {
++                    buffers
++                };
+                 let (actual, _) = read_pixels(
+                     &mut renderer,
+                     &mut targets[tick % buffers],
+                     &mut tracker,
+-                    &scene,
++                    &prepared,
+                     age,
+                 );
+                 if tick == 12 {
+@@ -410,11 +554,13 @@ fn screenshot_preview_pixels_and_fade_match_full_repaint() {
+                     &config,
+                     None,
+                 );
++                let (reference_prepared, _) =
++                    crate::render::conservative::prepare(&reference_scene);
+                 let (expected, _) = read_pixels(
+                     &mut renderer,
+                     &mut reference,
+                     &mut OutputDamageTracker::new(SIZE, 1.0, Transform::Normal),
+-                    &reference_scene,
++                    &reference_prepared,
+                     0,
+                 );
+                 let max_error = actual
+diff --git a/src/render/shaders/ui_rect_rounded.frag b/src/render/shaders/ui_rect_rounded.frag
+deleted file mode 100644
+index e1ec1c45..00000000
+--- a/src/render/shaders/ui_rect_rounded.frag
++++ /dev/null
+@@ -1,42 +0,0 @@
+-precision highp float;
+-//_DEFINES
+-
+-varying vec2 v_coords;
+-uniform sampler2D tex;
+-uniform float alpha;
+-uniform vec4 node_color;
+-uniform vec4 fill_color;
+-uniform vec2 rect_size;
+-uniform vec2 inner_rect_size;
+-uniform vec2 inner_rect_offset;
+-uniform float corner_radius;
+-uniform float inner_corner_radius;
+-uniform float border_px;
+-
+-float rounded_rect_sdf(vec2 p, vec2 size, float radius) {
+-    vec2 half_size = size * 0.5;
+-    vec2 q = abs(p) - (half_size - vec2(radius));
+-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+-}
+-
+-float sdf_alpha(float dist) {
+-    float aa = 0.75;
+-    return 1.0 - smoothstep(-aa, aa, dist);
+-}
+-
+-void main() {
+-    vec2 size = max(rect_size, vec2(1.0));
+-    float radius = min(corner_radius, min(size.x, size.y) * 0.5);
+-    vec2 p = v_coords * size - size * 0.5;
+-    float outer_alpha = sdf_alpha(rounded_rect_sdf(p, size, radius));
+-    if (outer_alpha <= 0.0) { discard; }
+-
+-    vec2 inner_size = max(inner_rect_size, vec2(1.0));
+-    float inner_radius = min(inner_corner_radius, min(inner_size.x, inner_size.y) * 0.5);
+-    vec2 inner_center = inner_rect_offset + inner_size * 0.5 - size * 0.5;
+-    float inner_alpha = border_px > 0.0
+-        ? sdf_alpha(rounded_rect_sdf(p - inner_center, inner_size, inner_radius))
+-        : outer_alpha;
+-    float border_alpha = max(outer_alpha - inner_alpha, 0.0);
+-    gl_FragColor = (fill_color * inner_alpha + node_color * border_alpha) * alpha;
+-}
+diff --git a/src/render/shaders/ui_rect_square.frag b/src/render/shaders/ui_rect_square.frag
+deleted file mode 100644
+index 5690d235..00000000
+--- a/src/render/shaders/ui_rect_square.frag
++++ /dev/null
+@@ -1,40 +0,0 @@
+-precision highp float;
+-//_DEFINES
+-
+-varying vec2 v_coords;
+-uniform sampler2D tex;
+-uniform float alpha;
+-uniform vec4 node_color;
+-uniform vec4 fill_color;
+-uniform vec2 rect_size;
+-uniform vec2 inner_rect_size;
+-uniform vec2 inner_rect_offset;
+-uniform float corner_radius;
+-uniform float inner_corner_radius;
+-uniform float border_px;
+-
+-float rect_sdf(vec2 p, vec2 size) {
+-    vec2 half_size = size * 0.5;
+-    vec2 q = abs(p) - half_size;
+-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+-}
+-
+-float sdf_alpha(float dist) {
+-    float aa = 0.75;
+-    return 1.0 - smoothstep(-aa, aa, dist);
+-}
+-
+-void main() {
+-    vec2 size = max(rect_size, vec2(1.0));
+-    vec2 p = v_coords * size - size * 0.5;
+-    float outer_alpha = sdf_alpha(rect_sdf(p, size));
+-    if (outer_alpha <= 0.0) { discard; }
+-
+-    vec2 inner_size = max(inner_rect_size, vec2(1.0));
+-    vec2 inner_center = inner_rect_offset + inner_size * 0.5 - size * 0.5;
+-    float inner_alpha = border_px > 0.0
+-        ? sdf_alpha(rect_sdf(p - inner_center, inner_size))
+-        : outer_alpha;
+-    float border_alpha = max(outer_alpha - inner_alpha, 0.0);
+-    gl_FragColor = (fill_color * inner_alpha + node_color * border_alpha) * alpha;
+-}
+diff --git a/src/render/text.rs b/src/render/text.rs
+index 8a048781..862de051 100644
+--- a/src/render/text.rs
++++ b/src/render/text.rs
+@@ -1,718 +1,39 @@
+-use std::collections::HashMap;
+-use std::error::Error;
+-use std::time::{Duration, Instant};
++//! Halley configuration adapter for the shared UI text renderer.
++pub use halley_ui::gles::UiTextElement;
++use std::ops::{Deref, DerefMut};
+ 
+-use cosmic_text::{
+-    Attrs, Buffer as TextBuffer, Color, Family, FontSystem, Hinting, Metrics, Shaping, Style,
+-    SwashCache, Weight,
+-};
+-use smithay::backend::allocator::Fourcc;
+-use smithay::backend::renderer::element::texture::TextureRenderElement;
+-use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
+-use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture};
+-use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
+-use smithay::backend::renderer::{ContextId, ImportMem, Renderer};
+-use smithay::utils::user_data::UserDataMap;
+-use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Transform};
+-
+-const TEXT_CACHE_TTL: Duration = Duration::from_secs(30);
+-const HINTING_MAX_SIZE_PX: u16 = 16;
+-// Keep antialiased pixels off the texture boundary. Some GLES sampling paths
+-// otherwise lose the final column of the trailing glyph.
+-const RASTER_TRAILING_PAD_PX: i32 = 2;
+-
+-struct TextTexture {
+-    texture: GlesTexture,
+-    size: smithay::utils::Size<i32, Buffer>,
+-    last_used: Instant,
+-}
+-
+-#[derive(Default)]
+-struct TextElementSizing {
+-    font_size_px: Option<u16>,
+-    destination_size: Option<smithay::utils::Size<i32, Physical>>,
+-}
+-
+-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+-struct TextKey {
+-    text: String,
+-    family: String,
+-    size_px: u16,
+-    rgb: [u8; 3],
+-}
+-
+-/// Shared renderer for compositor-owned text.
+-///
+-/// The live `font.size` setting is the default authority. A small number of
+-/// explicitly configurable widgets may request a per-element size; the cache
+-/// key keeps those rasterizations independent from global typography.
+ pub struct UiTextRenderer {
+-    context: Option<ContextId<GlesTexture>>,
+-    font_system: FontSystem,
+-    swash_cache: SwashCache,
+-    font: halley_config::Font,
+-    text: HashMap<TextKey, TextTexture>,
+-    /// Stable element identities, keyed by what the label *is* rather than by
+-    /// its call site, so the nineteen `element()` callers need not each invent
+-    /// and thread a slot name.
+-    ///
+-    /// The key is a hash of the [`TextKey`] plus how many times that exact
+-    /// label has already been emitted this frame. Two labels that collide
+-    /// would merely share an identity and so damage each other's rectangles —
+-    /// extra repaint, never a stale one.
+-    ids: super::ids::ElementIds<(u64, u32)>,
+-    occurrences: HashMap<u64, u32>,
+-}
+-
+-fn text_key_hash(key: &TextKey) -> u64 {
+-    use std::hash::{DefaultHasher, Hash, Hasher};
+-    let mut hasher = DefaultHasher::new();
+-    key.hash(&mut hasher);
+-    hasher.finish()
++    inner: halley_ui::gles::UiTextRenderer,
+ }
+-
+ impl Default for UiTextRenderer {
+     fn default() -> Self {
+         Self::new(&halley_config::Font::default())
+     }
+ }
+-
+ impl UiTextRenderer {
+     pub fn new(font: &halley_config::Font) -> Self {
+         Self {
+-            context: None,
+-            font_system: FontSystem::new(),
+-            swash_cache: SwashCache::new(),
+-            font: font.clone(),
+-            text: HashMap::new(),
+-            ids: super::ids::ElementIds::default(),
+-            occurrences: HashMap::new(),
++            inner: halley_ui::gles::UiTextRenderer::new(&ui_font(font)),
+         }
+     }
+-
+-    pub fn font_size(&self) -> u16 {
+-        configured_font_size(&self.font)
+-    }
+-
+-    /// Resets per-frame label numbering and ages out unused identities.
+-    pub fn begin_scene(&mut self) {
+-        self.occurrences.clear();
+-        self.ids.advance();
+-    }
+-
+-    /// Replace global typography atomically and report whether a frame must
+-    /// be redrawn. Textures are configuration-specific and cannot survive a
+-    /// font change.
+     pub fn reload_font(&mut self, font: &halley_config::Font) -> bool {
+-        if self.font == *font {
+-            return false;
+-        }
+-        self.font = font.clone();
+-        self.text.clear();
+-        true
+-    }
+-
+-    pub fn measure(
+-        &mut self,
+-        renderer: &mut GlesRenderer,
+-        text: &str,
+-        rgb: [u8; 3],
+-    ) -> Result<Option<smithay::utils::Size<i32, Buffer>>, Box<dyn Error>> {
+-        self.measure_with_size(renderer, text, rgb, None)
+-    }
+-
+-    pub fn measure_at_size(
+-        &mut self,
+-        renderer: &mut GlesRenderer,
+-        text: &str,
+-        rgb: [u8; 3],
+-        size_px: u16,
+-    ) -> Result<Option<smithay::utils::Size<i32, Buffer>>, Box<dyn Error>> {
+-        self.measure_with_size(renderer, text, rgb, Some(size_px))
+-    }
+-
+-    fn measure_with_size(
+-        &mut self,
+-        renderer: &mut GlesRenderer,
+-        text: &str,
+-        rgb: [u8; 3],
+-        size_px: Option<u16>,
+-    ) -> Result<Option<smithay::utils::Size<i32, Buffer>>, Box<dyn Error>> {
+-        let Some(key) = self.prepare_key(renderer, text, rgb, size_px)? else {
+-            return Ok(None);
+-        };
+-        let entry = self.text.get_mut(&key).expect("text entry prepared");
+-        entry.last_used = Instant::now();
+-        Ok(Some(entry.size))
+-    }
+-
+-    pub fn element(
+-        &mut self,
+-        renderer: &mut GlesRenderer,
+-        origin: Point<i32, Physical>,
+-        text: &str,
+-        rgb: [u8; 3],
+-        alpha: f32,
+-    ) -> Result<Option<PreparedUiText>, Box<dyn Error>> {
+-        self.element_with_options(
+-            renderer,
+-            origin,
+-            text,
+-            rgb,
+-            alpha,
+-            TextElementSizing::default(),
+-        )
+-    }
+-
+-    pub fn element_at_size(
+-        &mut self,
+-        renderer: &mut GlesRenderer,
+-        origin: Point<i32, Physical>,
+-        text: &str,
+-        rgb: [u8; 3],
+-        alpha: f32,
+-        size_px: u16,
+-    ) -> Result<Option<PreparedUiText>, Box<dyn Error>> {
+-        self.element_with_options(
+-            renderer,
+-            origin,
+-            text,
+-            rgb,
+-            alpha,
+-            TextElementSizing {
+-                font_size_px: Some(size_px),
+-                ..TextElementSizing::default()
+-            },
+-        )
+-    }
+-
+-    pub fn element_scaled(
+-        &mut self,
+-        renderer: &mut GlesRenderer,
+-        destination: Rectangle<i32, Physical>,
+-        text: &str,
+-        rgb: [u8; 3],
+-        alpha: f32,
+-    ) -> Result<Option<PreparedUiText>, Box<dyn Error>> {
+-        self.element_with_options(
+-            renderer,
+-            destination.loc,
+-            text,
+-            rgb,
+-            alpha,
+-            TextElementSizing {
+-                destination_size: Some(destination.size),
+-                ..TextElementSizing::default()
+-            },
+-        )
+-    }
+-
+-    pub fn element_scaled_at_size(
+-        &mut self,
+-        renderer: &mut GlesRenderer,
+-        destination: Rectangle<i32, Physical>,
+-        text: &str,
+-        rgb: [u8; 3],
+-        alpha: f32,
+-        size_px: u16,
+-    ) -> Result<Option<PreparedUiText>, Box<dyn Error>> {
+-        self.element_with_options(
+-            renderer,
+-            destination.loc,
+-            text,
+-            rgb,
+-            alpha,
+-            TextElementSizing {
+-                font_size_px: Some(size_px),
+-                destination_size: Some(destination.size),
+-            },
+-        )
+-    }
+-
+-    fn element_with_options(
+-        &mut self,
+-        renderer: &mut GlesRenderer,
+-        origin: Point<i32, Physical>,
+-        text: &str,
+-        rgb: [u8; 3],
+-        alpha: f32,
+-        sizing: TextElementSizing,
+-    ) -> Result<Option<PreparedUiText>, Box<dyn Error>> {
+-        if alpha <= 0.001 {
+-            return Ok(None);
+-        }
+-        let Some(key) = self.prepare_key(renderer, text, rgb, sizing.font_size_px)? else {
+-            return Ok(None);
+-        };
+-        let context = self.context.as_ref().expect("context prepared").clone();
+-        let hash = text_key_hash(&key);
+-        let occurrence = {
+-            let seen = self.occurrences.entry(hash).or_insert(0);
+-            let index = *seen;
+-            *seen += 1;
+-            index
+-        };
+-        let id = self.ids.id((hash, occurrence));
+-        let entry = self.text.get_mut(&key).expect("text entry prepared");
+-        entry.last_used = Instant::now();
+-        let source = Rectangle::<f64, Logical>::new(
+-            (0.0, 0.0).into(),
+-            (entry.size.w as f64, entry.size.h as f64).into(),
+-        );
+-        let base = TextureRenderElement::from_static_texture(
+-            id,
+-            context,
+-            origin.to_f64(),
+-            entry.texture.clone(),
+-            1,
+-            Transform::Normal,
+-            Some(alpha.clamp(0.0, 1.0)),
+-            Some(source),
+-            // Most callers keep the texture at its rasterized physical size;
+-            // titlebars may instead provide a camera-scaled destination.
+-            Some(match sizing.destination_size {
+-                Some(size) => size.to_logical(1),
+-                None => entry.size.to_logical(1, Transform::Normal),
+-            }),
+-            None,
+-            Kind::Unspecified,
+-        );
+-        Ok(Some(PreparedUiText {
+-            element: UiTextElement { base },
+-        }))
+-    }
+-
+-    fn prepare_key(
+-        &mut self,
+-        renderer: &mut GlesRenderer,
+-        text: &str,
+-        rgb: [u8; 3],
+-        size_px: Option<u16>,
+-    ) -> Result<Option<TextKey>, Box<dyn Error>> {
+-        if text.is_empty() {
+-            return Ok(None);
+-        }
+-        self.ensure_context(renderer);
+-        let now = Instant::now();
+-        self.text
+-            .retain(|_, entry| now.saturating_duration_since(entry.last_used) < TEXT_CACHE_TTL);
+-        let key = TextKey {
+-            text: text.to_string(),
+-            family: normalized_family(&self.font),
+-            size_px: effective_font_size(&self.font, size_px),
+-            rgb,
+-        };
+-        if !self.text.contains_key(&key) {
+-            let Some((pixels, size)) = raster_text(
+-                &mut self.font_system,
+-                &mut self.swash_cache,
+-                &key.text,
+-                key.size_px,
+-                key.rgb,
+-                &key.family,
+-            ) else {
+-                return Ok(None);
+-            };
+-            let texture = renderer.import_memory(&pixels, Fourcc::Abgr8888, size.into(), false)?;
+-            self.text.insert(
+-                key.clone(),
+-                TextTexture {
+-                    texture,
+-                    size: size.into(),
+-                    last_used: now,
+-                },
+-            );
+-        }
+-        Ok(Some(key))
+-    }
+-
+-    fn ensure_context(&mut self, renderer: &GlesRenderer) {
+-        let context = renderer.context_id();
+-        if self.context.as_ref() == Some(&context) {
+-            return;
+-        }
+-        self.context = Some(context);
+-        self.text.clear();
+-    }
+-}
+-
+-pub struct PreparedUiText {
+-    pub element: UiTextElement,
+-}
+-
+-#[derive(Debug)]
+-pub struct UiTextElement {
+-    base: TextureRenderElement<GlesTexture>,
+-}
+-
+-fn normalized_family(font: &halley_config::Font) -> String {
+-    let family = font.family.trim();
+-    if family.is_empty() {
+-        halley_config::Font::default().family
+-    } else {
+-        family.to_string()
+-    }
+-}
+-
+-fn configured_font_size(font: &halley_config::Font) -> u16 {
+-    font.size.max(1)
+-}
+-
+-fn effective_font_size(font: &halley_config::Font, override_px: Option<u16>) -> u16 {
+-    override_px
+-        .unwrap_or_else(|| configured_font_size(font))
+-        .max(1)
+-}
+-
+-fn raster_text(
+-    font_system: &mut FontSystem,
+-    swash_cache: &mut SwashCache,
+-    text: &str,
+-    size_px: u16,
+-    rgb: [u8; 3],
+-    family: &str,
+-) -> Option<(Vec<u8>, (i32, i32))> {
+-    let font_size = size_px.max(1) as f32;
+-    let mut buffer = TextBuffer::new(
+-        font_system,
+-        Metrics::new(font_size, (font_size * 1.25).ceil()),
+-    );
+-    buffer.set_hinting(if size_px <= HINTING_MAX_SIZE_PX {
+-        Hinting::Enabled
+-    } else {
+-        Hinting::Disabled
+-    });
+-    buffer.set_size(None, None);
+-    let request = parse_font_request(family);
+-    let resolved = resolve_named_family(font_system, request.family);
+-    buffer.set_text(
+-        text,
+-        &Attrs::new()
+-            .family(resolve_family(
+-                resolved.as_deref().unwrap_or(request.family),
+-            ))
+-            .style(request.style)
+-            .weight(request.weight),
+-        Shaping::Advanced,
+-        None,
+-    );
+-    buffer.shape_until_scroll(font_system, true);
+-
+-    let mut width = 0_i32;
+-    let mut height = 0_i32;
+-    for run in buffer.layout_runs() {
+-        width = width.max(run.line_w.ceil() as i32);
+-        height = height.max((run.line_top + run.line_height).ceil() as i32);
+-        for glyph in run.glyphs {
+-            let physical = glyph.physical((0.0, run.line_y), 1.0);
+-            if let Some(image) = swash_cache
+-                .get_image(font_system, physical.cache_key)
+-                .as_ref()
+-            {
+-                let glyph_width = i32::try_from(image.placement.width).unwrap_or(i32::MAX);
+-                let right = physical
+-                    .x
+-                    .saturating_add(image.placement.left)
+-                    .saturating_add(glyph_width);
+-                width = width.max(right);
+-            }
+-        }
+-    }
+-    width = width.max(1).saturating_add(RASTER_TRAILING_PAD_PX);
+-    height = height.max((font_size * 1.25).ceil() as i32).max(1);
+-
+-    let mut pixels = vec![0_u8; width as usize * height as usize * 4];
+-    let color = Color::rgba(rgb[0], rgb[1], rgb[2], 255);
+-    for run in buffer.layout_runs() {
+-        for glyph in run.glyphs {
+-            let physical = glyph.physical((0.0, run.line_y), 1.0);
+-            swash_cache.with_pixels(font_system, physical.cache_key, color, |gx, gy, pixel| {
+-                let x = physical.x + gx;
+-                let y = physical.y + gy;
+-                if x < 0 || y < 0 || x >= width || y >= height {
+-                    return;
+-                }
+-                let index = ((y as usize * width as usize) + x as usize) * 4;
+-                let alpha = pixel.a() as f32 / 255.0;
+-                // Smithay's GLES path expects premultiplied RGBA.
+-                pixels[index] = (pixel.r() as f32 * alpha).round() as u8;
+-                pixels[index + 1] = (pixel.g() as f32 * alpha).round() as u8;
+-                pixels[index + 2] = (pixel.b() as f32 * alpha).round() as u8;
+-                pixels[index + 3] = pixel.a();
+-            });
+-        }
+-    }
+-    Some((pixels, (width, height)))
+-}
+-
+-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+-struct FontRequest<'a> {
+-    family: &'a str,
+-    style: Style,
+-    weight: Weight,
+-}
+-
+-fn parse_font_request(requested: &str) -> FontRequest<'_> {
+-    let trimmed = requested.trim();
+-    let mut family = if trimmed.is_empty() {
+-        "monospace"
+-    } else {
+-        trimmed
+-    };
+-    let mut style = Style::Normal;
+-    let mut weight = Weight::NORMAL;
+-    loop {
+-        if style == Style::Normal {
+-            if let Some(stripped) = strip_suffix(family, &[" italic"]) {
+-                family = stripped;
+-                style = Style::Italic;
+-                continue;
+-            }
+-            if let Some(stripped) = strip_suffix(family, &[" oblique"]) {
+-                family = stripped;
+-                style = Style::Oblique;
+-                continue;
+-            }
+-        }
+-        if weight == Weight::NORMAL {
+-            for (suffixes, parsed) in [
+-                (
+-                    &[" extra bold", " extra-bold", " extrabold"][..],
+-                    Weight::EXTRA_BOLD,
+-                ),
+-                (
+-                    &[" semi bold", " semi-bold", " semibold"][..],
+-                    Weight::SEMIBOLD,
+-                ),
+-                (
+-                    &[" extra light", " extra-light", " extralight"][..],
+-                    Weight::EXTRA_LIGHT,
+-                ),
+-                (&[" bold"][..], Weight::BOLD),
+-                (&[" medium"][..], Weight::MEDIUM),
+-                (&[" light"][..], Weight::LIGHT),
+-                (&[" thin"][..], Weight::THIN),
+-                (&[" black"][..], Weight::BLACK),
+-            ] {
+-                if let Some(stripped) = strip_suffix(family, suffixes) {
+-                    family = stripped;
+-                    weight = parsed;
+-                    break;
+-                }
+-            }
+-            if weight != Weight::NORMAL {
+-                continue;
+-            }
+-        }
+-        break;
++        self.inner.reload_font(&ui_font(font))
+     }
+-    FontRequest {
+-        family,
+-        style,
+-        weight,
+-    }
+-}
+-
+-fn strip_suffix<'a>(family: &'a str, suffixes: &[&str]) -> Option<&'a str> {
+-    let folded = family.to_ascii_lowercase();
+-    suffixes.iter().find_map(|suffix| {
+-        folded
+-            .ends_with(suffix)
+-            .then(|| family[..family.len() - suffix.len()].trim_end())
+-    })
+ }
+-
+-fn resolve_family(family: &str) -> Family<'_> {
+-    match family.trim().to_ascii_lowercase().as_str() {
+-        "serif" => Family::Serif,
+-        "sans-serif" | "sans_serif" | "sansserif" | "sans" => Family::SansSerif,
+-        "cursive" => Family::Cursive,
+-        "fantasy" => Family::Fantasy,
+-        "monospace" => Family::Monospace,
+-        _ => Family::Name(family),
++impl Deref for UiTextRenderer {
++    type Target = halley_ui::gles::UiTextRenderer;
++    fn deref(&self) -> &Self::Target {
++        &self.inner
+     }
+ }
+-
+-fn resolve_named_family(font_system: &FontSystem, requested: &str) -> Option<String> {
+-    if matches!(
+-        resolve_family(requested),
+-        Family::Serif | Family::SansSerif | Family::Cursive | Family::Fantasy | Family::Monospace
+-    ) {
+-        return None;
++impl DerefMut for UiTextRenderer {
++    fn deref_mut(&mut self) -> &mut Self::Target {
++        &mut self.inner
+     }
+-    let requested = fold_font_name(requested);
+-    font_system.db().faces().find_map(|face| {
+-        face.families
+-            .iter()
+-            .map(|(family, _)| family.as_str())
+-            .find(|family| fold_font_name(family) == requested)
+-            .map(str::to_string)
+-            .or_else(|| {
+-                (fold_font_name(&face.post_script_name) == requested)
+-                    .then(|| face.families.first().map(|(family, _)| family.clone()))
+-                    .flatten()
+-            })
+-    })
+-}
+-
+-fn fold_font_name(name: &str) -> String {
+-    name.chars()
+-        .filter(|character| !matches!(character, ' ' | '-' | '_'))
+-        .flat_map(char::to_lowercase)
+-        .collect()
+ }
+-
+-impl Element for UiTextElement {
+-    fn id(&self) -> &Id {
+-        self.base.id()
+-    }
+-    fn current_commit(&self) -> CommitCounter {
+-        self.base.current_commit()
+-    }
+-    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
+-        self.base.geometry(scale)
+-    }
+-    fn transform(&self) -> Transform {
+-        self.base.transform()
+-    }
+-    fn src(&self) -> Rectangle<f64, Buffer> {
+-        self.base.src()
+-    }
+-    fn damage_since(
+-        &self,
+-        scale: Scale<f64>,
+-        commit: Option<CommitCounter>,
+-    ) -> DamageSet<i32, Physical> {
+-        self.base.damage_since(scale, commit)
+-    }
+-    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+-        self.base.opaque_regions(scale)
+-    }
+-    fn alpha(&self) -> f32 {
+-        self.base.alpha()
+-    }
+-    fn kind(&self) -> Kind {
+-        self.base.kind()
+-    }
+-}
+-
+-impl RenderElement<GlesRenderer> for UiTextElement {
+-    fn draw(
+-        &self,
+-        frame: &mut GlesFrame<'_, '_>,
+-        src: Rectangle<f64, Buffer>,
+-        dst: Rectangle<i32, Physical>,
+-        damage: &[Rectangle<i32, Physical>],
+-        opaque_regions: &[Rectangle<i32, Physical>],
+-        cache: Option<&UserDataMap>,
+-    ) -> Result<(), GlesError> {
+-        <TextureRenderElement<GlesTexture> as RenderElement<GlesRenderer>>::draw(
+-            &self.base,
+-            frame,
+-            src,
+-            dst,
+-            damage,
+-            opaque_regions,
+-            cache,
+-        )
+-    }
+-
+-    fn underlying_storage(&self, renderer: &mut GlesRenderer) -> Option<UnderlyingStorage<'_>> {
+-        <TextureRenderElement<GlesTexture> as RenderElement<GlesRenderer>>::underlying_storage(
+-            &self.base, renderer,
+-        )
+-    }
+-}
+-
+-#[cfg(test)]
+-mod tests {
+-    use super::*;
+-
+-    #[test]
+-    fn configured_size_is_used_without_per_overlay_offsets() {
+-        let font = halley_config::Font {
+-            family: "monospace".to_string(),
+-            size: 11,
+-        };
+-        assert_eq!(configured_font_size(&font), 11);
+-        assert_eq!(
+-            configured_font_size(&halley_config::Font {
+-                family: "monospace".to_string(),
+-                size: 0,
+-            }),
+-            1
+-        );
+-        assert_eq!(effective_font_size(&font, None), 11);
+-        assert_eq!(effective_font_size(&font, Some(18)), 18);
+-        assert_eq!(effective_font_size(&font, Some(0)), 1);
+-    }
+-
+-    #[test]
+-    fn family_suffixes_select_weight_and_style_without_losing_the_name() {
+-        let parsed = parse_font_request("CommitMono Nerd Font Semi-Bold Italic");
+-        assert_eq!(parsed.family, "CommitMono Nerd Font");
+-        assert_eq!(parsed.weight, Weight::SEMIBOLD);
+-        assert_eq!(parsed.style, Style::Italic);
+-    }
+-
+-    #[test]
+-    fn cosmic_text_raster_is_nonempty_and_premultiplied() {
+-        let mut fonts = FontSystem::new();
+-        let mut swash = SwashCache::new();
+-        let (pixels, (width, height)) = raster_text(
+-            &mut fonts,
+-            &mut swash,
+-            "Halley",
+-            11,
+-            [80, 160, 240],
+-            "monospace",
+-        )
+-        .unwrap();
+-        assert!(width > 0 && height > 0);
+-        assert!(pixels.chunks_exact(4).any(|pixel| pixel[3] > 0));
+-        assert!(
+-            pixels.chunks_exact(4).all(|pixel| {
+-                pixel[0] <= pixel[3] && pixel[1] <= pixel[3] && pixel[2] <= pixel[3]
+-            })
+-        );
+-    }
+-
+-    #[test]
+-    fn raster_keeps_trailing_glyphs_off_the_texture_boundary() {
+-        let mut fonts = FontSystem::new();
+-        let mut swash = SwashCache::new();
+-        for text in [
+-            "Build a cluster",
+-            "1 selected",
+-            "Space select  ·  Enter name  ·  Esc cancel",
+-        ] {
+-            let (pixels, (width, height)) = raster_text(
+-                &mut fonts,
+-                &mut swash,
+-                text,
+-                11,
+-                [255, 255, 255],
+-                "monospace",
+-            )
+-            .unwrap();
+-            let right = (0..width)
+-                .rev()
+-                .find(|x| (0..height).any(|y| pixels[((y * width + x) * 4 + 3) as usize] > 0))
+-                .expect("raster contains visible pixels");
+-            assert!(
+-                right < width - 1,
+-                "{text:?} touched the trailing texture boundary: width={width} right={right}"
+-            );
+-        }
+-    }
+-
+-    #[test]
+-    fn font_reload_only_invalidates_on_change() {
+-        let mut renderer = UiTextRenderer::default();
+-        assert!(!renderer.reload_font(&halley_config::Font::default()));
+-        assert!(renderer.reload_font(&halley_config::Font {
+-            family: "sans-serif".to_string(),
+-            size: 12,
+-        }));
++fn ui_font(font: &halley_config::Font) -> halley_ui::Font {
++    halley_ui::Font {
++        family: font.family.clone(),
++        size: font.size,
+     }
+ }
