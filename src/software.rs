@@ -93,19 +93,37 @@ impl<'a> Surface<'a> {
     }
     pub fn clear(&mut self, color: Color) {
         let bytes = color.premultiplied().map(|v| (v * 255.0).round() as u8);
-        for y in 0..self.height {
-            for x in 0..self.width {
-                self.write(x, y, bytes);
+        let bytes = if self.format == PixelFormat::Bgra {
+            [bytes[2], bytes[1], bytes[0], bytes[3]]
+        } else {
+            bytes
+        };
+        let row_bytes = self.width as usize * 4;
+        for row in self.pixels[..self.stride * self.height as usize].chunks_exact_mut(self.stride) {
+            let row = &mut row[..row_bytes];
+            if bytes == [0; 4] {
+                row.fill(0);
+            } else {
+                for pixel in row.chunks_exact_mut(4) {
+                    pixel.copy_from_slice(&bytes);
+                }
             }
         }
     }
     pub fn draw(&mut self, view: &PreparedView, text: &mut TextSystem, opacity: f32) {
         let opacity = opacity.clamp(0.0, 1.0);
+        if opacity == 0.0 {
+            return;
+        }
         for item in &view.items {
             match item {
                 PaintItem::Card {
                     rect, clip, style, ..
                 } => {
+                    // Invisible container chrome must not rasterize its entire bounds.
+                    if style.fill.a <= 0.0 && style.border.a <= 0.0 {
+                        continue;
+                    }
                     let border = style
                         .border_width
                         .max(0.0)
@@ -129,6 +147,10 @@ impl<'a> Surface<'a> {
                     );
                     let fill = style.fill.premultiplied();
                     let stroke = style.border.premultiplied();
+                    let solid = fill.map(|channel| channel * opacity);
+                    // Interior spans normally sit on one constant background. Reuse
+                    // the exact source-over result instead of repeating float blending.
+                    let mut solid_cache: Option<([u8; 4], [u8; 4])> = None;
                     self.for_rect(rect.intersection(*clip), |surface, x, y| {
                         let p = Point::new(x as f32 + 0.5, y as f32 + 0.5);
                         let outer = coverage(sdf(p, *rect, radius));
@@ -138,6 +160,22 @@ impl<'a> Surface<'a> {
                             outer
                         };
                         let edge = (outer - inside).max(0.0);
+                        if inside == 1.0 && edge == 0.0 {
+                            let index = y as usize * surface.stride + x as usize * 4;
+                            let old: [u8; 4] = surface.pixels[index..index + 4].try_into().unwrap();
+                            if let Some((previous, output)) = solid_cache
+                                && previous == old
+                            {
+                                surface.pixels[index..index + 4].copy_from_slice(&output);
+                            } else {
+                                surface.blend(x, y, solid);
+                                solid_cache = Some((
+                                    old,
+                                    surface.pixels[index..index + 4].try_into().unwrap(),
+                                ));
+                            }
+                            return;
+                        }
                         surface.blend(
                             x,
                             y,
@@ -211,6 +249,9 @@ impl<'a> Surface<'a> {
                 .floor()
                 .clamp(0.0, height as f32 - 1.0) as usize;
             let start = (sy * width as usize + sx) * 4;
+            if pixels[start..start + 4] == [0; 4] {
+                return;
+            }
             surface.blend(
                 x,
                 y,
@@ -266,7 +307,14 @@ fn sdf(point: Point, rect: Rect, radius: f32) -> f32 {
     let radius = radius.min(half.width.min(half.height)).max(0.0);
     let qx = (point.x - rect.origin.x - half.width).abs() - half.width + radius;
     let qy = (point.y - rect.origin.y - half.height).abs() - half.height + radius;
-    qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius
+    // Only rounded corners need a distance calculation. Interior and straight
+    // edges have an exact one-dimensional distance, including the AA fringe.
+    let outside = if qx > 0.0 && qy > 0.0 {
+        qx.hypot(qy)
+    } else {
+        qx.max(qy).max(0.0)
+    };
+    outside + qx.max(qy).min(0.0) - radius
 }
 fn coverage(distance: f32) -> f32 {
     let t = ((distance + 0.75) / 1.5).clamp(0.0, 1.0);

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- Skip transparent chrome and glyph pixels in the software renderer.
+- Use exact straight-edge distance calculations outside rounded corners.
+- Clear borrowed buffers by row while preserving stride padding.
+
 ## 0.1.1
 
 - Buttons can contain composed widgets while retaining full-row focus, activation, and accessibility semantics.
