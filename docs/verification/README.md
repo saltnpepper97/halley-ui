@@ -6,7 +6,8 @@ The published core has no Smithay or Wayland dependency. GPU renderers,
 textures, shaders, damage policy, and protocol buffer handling stay in Halley.
 The final core-only integration matched the same 252 historical frame fixtures.
 Shared text services use the host's existing glyph texture cache; simple
-notification padding uses cached Taffy measurements.
+notification padding uses cached [Taffy](https://github.com/DioxusLabs/taffy)
+measurements.
 
 Toolkit checks cover layout, clipping, software pixels/stride, assets, editing,
 selection, clipboard ownership, composition, focus, scrolling, and AccessKit tree
@@ -88,8 +89,9 @@ These prevent claiming a clean strict workspace lint run.
 
 The compositor still uses its native Smithay GLES scene, extracted card shaders,
 and existing glyph texture cache. Notification layout reuses cached glyph
-measurements and caches the Taffy result. It introduces no software full-frame
-UI upload or second notification text rasterization.
+measurements and caches the [Taffy](https://github.com/DioxusLabs/taffy) result.
+It introduces no software full-frame UI upload or second notification text
+rasterization.
 
 The installed feature build is now confirmed running. A thirty-second live
 CPU/GPU/memory sample and a matched warm-notification benchmark on the real AMD

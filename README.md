@@ -1,8 +1,9 @@
 # Halley UI
 
-A small Rust UI toolkit for the Halley ecosystem: Taffy layout, components,
-Unicode text editing, focus, scrolling, shared text rendering, and direct
-software drawing. The toolkit is independent of Smithay and Wayland.
+A small Rust UI toolkit for the Halley ecosystem:
+[Taffy](https://github.com/DioxusLabs/taffy) layout, components, Unicode text
+editing, focus, scrolling, shared text rendering, and direct software drawing.
+The toolkit is independent of Smithay and Wayland.
 
 ## Quick start
 

@@ -23,4 +23,5 @@ pointer dispatch; use one activation policy to avoid dispatching twice.
 
 Use `Button::new("open", "").accessible_label("Open item").child(row)` for a
 button containing an image, title, subtitle, or shortcut hint. Its children use
-Taffy layout, and the full button remains the activation target.
+[Taffy](https://github.com/DioxusLabs/taffy) layout, and the full button remains
+the activation target.

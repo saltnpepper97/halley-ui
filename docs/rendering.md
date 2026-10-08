@@ -1,7 +1,8 @@
 # Rendering and buffers
 
-`UiView::prepare` uses Taffy and shared Cosmic Text / Swash services to produce a
-`PreparedView`. Its paint items are in back-to-front order and carry explicit
+`UiView::prepare` uses [Taffy](https://github.com/DioxusLabs/taffy) and shared
+Cosmic Text / Swash services to produce a `PreparedView`. Its paint items are
+in back-to-front order and carry explicit
 clips. Geometry is in the coordinate system of the supplied bounds.
 
 ## Software drawing

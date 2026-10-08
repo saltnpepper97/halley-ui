@@ -29,8 +29,9 @@ configured refresh rates, not measured delivered frame rates.
 
 The benchmark runs both paths in one optimized executable on the real AMD GPU.
 It compares the pre-extraction text renderer from Halley's base commit with the
-shared text renderer and cached Taffy notification padding. The card renderer
-and its shaders are held constant. Both paths produce byte-identical pixels.
+shared text renderer and cached [Taffy](https://github.com/DioxusLabs/taffy)
+notification padding. The card renderer and its shaders are held constant.
+Both paths produce byte-identical pixels.
 Dependency package versions match Halley's installed-build lockfile.
 
 Each of eight trials runs 20,000 cached scene preparations, then 200 timed draws

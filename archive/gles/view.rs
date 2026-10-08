@@ -60,7 +60,8 @@ impl UiRenderer {
             images: Vec::new(),
         }
     }
-    /// Prepare Taffy layout through the GPU glyph cache, without a second CPU raster.
+    /// Prepare [Taffy](https://github.com/DioxusLabs/taffy) layout through the GPU
+    /// glyph cache, without a second CPU raster.
     pub fn prepare<'a>(
         &mut self,
         renderer: &mut GlesRenderer,

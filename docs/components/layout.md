@@ -14,8 +14,9 @@ let content = Column::new("content").gap(12.0)
         .child(Button::new("create", "Create")));
 ```
 
-Taffy computes sizes and positions. Leaf measurements come from shared text
-services or the host's measurement callback. Use `UiView::anchor` and `margin`
+[Taffy](https://github.com/DioxusLabs/taffy) computes sizes and positions.
+Leaf measurements come from shared text services or the host's measurement
+callback. Use `UiView::anchor` and `margin`
 to position the root inside the available rectangle; the default anchor is
 `TopCenter`. Drawing does not apply automatic DPI scaling.
 

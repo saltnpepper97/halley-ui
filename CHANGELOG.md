@@ -15,7 +15,8 @@
 
 Initial release of the Smithay-independent toolkit.
 
-- Taffy-backed cards, containers, rows, columns, labels, buttons, and images.
+- [Taffy](https://github.com/DioxusLabs/taffy)-backed cards, containers, rows,
+  columns, labels, buttons, and images.
 - Single-line Unicode editing, selection, clipboard requests, and IME composition.
 - Keyboard and pointer focus, activation, and clipped scrolling with focus reveal.
 - Shared Cosmic Text / Swash shaping and glyph rendering with bounded caches.

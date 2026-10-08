@@ -227,7 +227,8 @@ impl UiTextRenderer {
         )
     }
 
-    /// Taffy layout cached by the already measured glyph dimensions.
+    /// [Taffy](https://github.com/DioxusLabs/taffy) layout cached by the already
+    /// measured glyph dimensions.
     pub fn padded_label_layout(
         &mut self,
         size: smithay::utils::Size<i32, Buffer>,

@@ -1,5 +1,6 @@
 #![doc = include_str!("../docs/components/text-input.md")]
-//! Composable widgets and cached Taffy layout. Paint and input use one prepared view.
+//! Composable widgets and cached [Taffy](https://github.com/DioxusLabs/taffy) layout.
+//! Paint and input use one prepared view.
 use crate::{Color, Font, Insets, Point, Rect, Size, TextOverflow, TextSystem, assets::ImageData};
 use std::{
     collections::{HashMap, HashSet},
