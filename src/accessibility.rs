@@ -61,6 +61,8 @@ impl AccessibilityTree {
                 SemanticRole::Button => Role::Button,
                 SemanticRole::TextInput => Role::TextInput,
                 SemanticRole::Image => Role::Image,
+                SemanticRole::List => Role::ListBox,
+                SemanticRole::ListItem => Role::ListBoxOption,
             };
             let mut node = Node::new(role);
             node.set_bounds(bounds(semantic.rect));
@@ -81,8 +83,14 @@ impl AccessibilityTree {
             if semantic.read_only {
                 node.set_read_only();
             }
+            if let Some(selected) = semantic.selected {
+                node.set_selected(selected);
+            }
+            if let Some(key) = &semantic.active_descendant {
+                node.set_active_descendant(self.id(key, 0));
+            }
             match semantic.role {
-                SemanticRole::Button => {
+                SemanticRole::Button | SemanticRole::ListItem => {
                     if semantic.label.is_none()
                         && let Some(value) = &semantic.value
                     {
@@ -140,7 +148,10 @@ impl AccessibilityTree {
                     }
                     nodes.push((run_id, run));
                 }
-                SemanticRole::Scroll => {
+                SemanticRole::Scroll | SemanticRole::List => {
+                    if matches!(semantic.role, SemanticRole::List) && !semantic.disabled {
+                        node.add_action(Action::Focus);
+                    }
                     if let Some(scroll) = prepared
                         .scrolls
                         .iter()
@@ -156,7 +167,9 @@ impl AccessibilityTree {
                         node.set_scroll_y_max(
                             (scroll.extent.height - scroll.viewport.size.height).max(0.0) as f64,
                         );
-                        node.add_action(Action::SetScrollOffset);
+                        if !semantic.disabled {
+                            node.add_action(Action::SetScrollOffset);
+                        }
                     }
                 }
                 _ => {}

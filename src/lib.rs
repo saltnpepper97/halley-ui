@@ -17,8 +17,8 @@ pub mod ui;
 pub use geometry::{Color, Insets, Point, Rect, Size};
 pub use text::{Font, TextOverflow, TextSystem};
 pub use ui::{
-    ActionId, Anchor, Button, Card, Column, Container, Image, Label, Row, Scroll, TextInput, Theme,
-    UiView, Widget,
+    ActionId, Anchor, Button, Card, Column, Container, Image, InteractionError, Label, List,
+    ListItem, Row, Scroll, TextInput, Theme, UiView, Widget,
 };
 
 pub use input::{InputEvent, Key, Modifiers, UiEvent};

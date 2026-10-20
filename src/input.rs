@@ -18,6 +18,10 @@ pub enum Key {
     Escape,
     Left,
     Right,
+    Up,
+    Down,
+    PageUp,
+    PageDown,
     Home,
     End,
     Backspace,
@@ -83,6 +87,10 @@ pub enum UiEvent {
         value: String,
     },
     FocusChanged(Option<String>),
+    SelectionChanged {
+        key: String,
+        selected: Option<String>,
+    },
     ClipboardWrite(String),
     ClipboardRead {
         request: u64,
@@ -232,6 +240,8 @@ fn next_word(text: &str, cursor: usize) -> usize {
 pub(crate) struct State {
     pub editors: HashMap<String, Editor>,
     pub scroll: HashMap<String, Point>,
+    pub lists: HashMap<String, Option<String>>,
+    pub pending_reveal: Vec<String>,
     pub focus: Option<String>,
     pub hover: Option<String>,
     pub pressed: Option<String>,
@@ -268,6 +278,14 @@ impl State {
             scrolls ^= h.finish();
         }
         scrolls.hash(&mut hash);
+        let mut lists = 0u64;
+        for (key, selected) in &self.lists {
+            let mut h = DefaultHasher::new();
+            key.hash(&mut h);
+            selected.hash(&mut h);
+            lists ^= h.finish();
+        }
+        lists.hash(&mut hash);
         hash.finish()
     }
 }

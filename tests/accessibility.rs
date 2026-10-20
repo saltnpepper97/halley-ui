@@ -36,6 +36,94 @@ fn request(action: Action, id: NodeId, data: Option<ActionData>) -> ActionReques
         data,
     }
 }
+
+#[test]
+fn list_options_expose_selection_active_descendant_and_accessible_focus_and_activation() {
+    use halley_ui::{List, ListItem};
+    let content = |reverse| {
+        let mut list = List::new("results")
+            .accessible_label("Applications")
+            .width(240.0)
+            .height(60.0);
+        for i in if reverse {
+            vec![4, 3, 2, 1, 0]
+        } else {
+            vec![0, 1, 2, 3, 4]
+        } {
+            list = list.child(
+                ListItem::new(format!("option-{i}"), format!("App {i}"))
+                    .height(30.0)
+                    .disabled(i == 2),
+            );
+        }
+        Column::new("content")
+            .child(TextInput::new("search", ""))
+            .child(list)
+    };
+    let mut view = UiView::new("list").content(content(false));
+    let mut tree = AccessibilityTree::default();
+    let scene = prepared(&mut view);
+    let update = tree.update(&scene, "Applications");
+    let _ = accesskit_consumer::Tree::new(update.clone(), true);
+    let list_id = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::ListBox)
+        .unwrap()
+        .0;
+    let item_id = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.label() == Some("App 4"))
+        .unwrap()
+        .0;
+    let disabled = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.label() == Some("App 2"))
+        .unwrap();
+    assert!(disabled.1.is_disabled());
+    assert!(!disabled.1.supports_action(Action::Focus));
+    assert!(!disabled.1.supports_action(Action::Click));
+    assert!(
+        view.handle_accessibility(AccessibleAction::Focus("option-2".into()))
+            .is_empty()
+    );
+    let action = tree.action(request(Action::Focus, item_id, None)).unwrap();
+    let events = view.handle_accessibility(action);
+    assert!(events.contains(&UiEvent::SelectionChanged {
+        key: "results".into(),
+        selected: Some("option-4".into())
+    }));
+    assert_eq!(view.focused(), Some("results"));
+    let scene = prepared(&mut view);
+    assert!(scene.scrolls[0].offset.y > 0.0);
+    let update = tree.update(&scene, "Applications");
+    assert_eq!(update.focus, list_id);
+    let list = update.nodes.iter().find(|(id, _)| *id == list_id).unwrap();
+    assert_eq!(list.1.active_descendant(), Some(item_id));
+    let item = update.nodes.iter().find(|(id, _)| *id == item_id).unwrap();
+    assert_eq!(item.1.role(), Role::ListBoxOption);
+    assert_eq!(item.1.is_selected(), Some(true));
+    let _ = accesskit_consumer::Tree::new(update, true);
+    view.focus("search").unwrap();
+    let action = tree.action(request(Action::Click, item_id, None)).unwrap();
+    assert!(
+        view.handle_accessibility(action)
+            .contains(&UiEvent::Activate(halley_ui::ActionId::new("option-4")))
+    );
+    assert_eq!(view.focused(), Some("search"));
+    view.set_content(content(true));
+    let scene = prepared(&mut view);
+    let update = tree.update(&scene, "Applications");
+    assert!(
+        update
+            .nodes
+            .iter()
+            .any(|(id, n)| *id == item_id && n.is_selected() == Some(true))
+    );
+    let _ = accesskit_consumer::Tree::new(update, true);
+}
 #[test]
 fn tree_is_valid_and_exposes_names_values_focus_selection_and_disabled_state() {
     let mut view = view();

@@ -26,6 +26,13 @@ view and skips disabled controls. Pointer movement sets hover, pointer down
 sets focus and capture, and pointer up activates an enabled button only when
 released inside it. Send `PointerCancel` if native capture is lost.
 
+After preparation, `view.focus(key)` requests focus directly and
+`view.clear_focus()` clears it; dispatch their returned focus events normally.
+Focus requests reveal their target during the next preparation. A selectable
+list takes one Tab stop and retains its selection independently of focus.
+See [List and ListItem](components/list.md) for navigation and routing arrow keys
+from a search field without moving focus.
+
 ## Clipboard
 
 `ClipboardWrite(text)` asks the host to copy the selected text.
