@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Center checkbox marks with font-independent vector assets.
+- Add opt-in, host-clock-driven switch thumb/track motion with smooth reversal,
+  an immediate reduced-motion path, and bounded animation lifetimes.
+
 - Add retained Checkbox, Switch, and RadioGroup/RadioOption controls with silent
   programmatic updates, user value-change events, and disabled values.
 - Add Space activation, one Tab stop per radio group, wrapping arrow navigation,

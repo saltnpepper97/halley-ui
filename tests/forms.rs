@@ -687,7 +687,12 @@ fn checked_shapes_and_switch_thumb_positions_reach_the_software_renderer() {
     };
     let mut pixels = PixelBuffer::new(250, 180).unwrap();
     pixels.surface().draw(&first, &mut text, 1.0);
-    assert!(first.items.iter().any(|p| matches!(p, PaintItem::Text { key, text, .. } if key == "pixels/check/mark" && text == "✓")));
+    assert!(
+        first
+            .items
+            .iter()
+            .any(|p| matches!(p, PaintItem::Image { key, .. } if key == "pixels/check/mark"))
+    );
     assert!(
         first
             .items

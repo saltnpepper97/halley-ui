@@ -105,6 +105,37 @@ and group gap. These metrics are state-independent and feed both measurement and
 painting. Switch width must be at least the indicator size; metrics must be finite
 and nonnegative. Explicit layout padding and group `gap` builders override theme
 defaults. Theme changes preserve values and recompute layout, clips, and painting.
+Checkbox marks use a centered vector asset independent of font bearings or glyph
+padding. The existing image paint path handles them in every renderer.
+
+## Switch motion
+
+The host opts into motion using `set_switch_animation_duration`, available on
+both `UiView` and `UiStack`. Zero is the default and snaps immediately, so hosts
+that do not schedule animation frames keep their existing behavior. A zero
+duration also provides the reduced-motion path.
+
+```rust
+use std::time::Duration;
+use halley_ui::{Switch, UiView};
+let mut view = UiView::new("settings").content(Switch::new("sync", "Sync"));
+view.set_switch_animation_duration(Duration::from_millis(160));
+// Before forwarding input, advance the clock to the input timestamp so an idle
+// interval cannot finish a transition that has only just started.
+view.advance_animations(Duration::from_millis(16));
+// After input and on subsequent frames, advance with actual elapsed time,
+// prepare, and draw. Request another frame while has_animations() is true.
+```
+
+Motion interpolates the thumb and track fill with an ease-out curve. Logical
+values, accessibility state, and change events update immediately; focus and hit
+geometry stay fixed. Reversing a switch continues from its current position and
+color. Initial values do not animate, and removing a switch removes its motion.
+No timers or background redraw loop are created by the toolkit. With `UiStack`,
+the configured duration also applies to newly opened layers, and its advance and
+animation-query methods cover all layers.
+
+## Accessibility
 
 With accessibility enabled, these controls expose CheckBox, Switch, RadioGroup,
 and RadioButton roles, labels, checked state, disabled state, and validation state.

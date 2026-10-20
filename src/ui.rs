@@ -613,6 +613,7 @@ pub struct UiView {
     editing_text: Option<TextSystem>,
     input_scene: Option<interaction::InputScene>,
     content_revision: u64,
+    form_assets: forms::Assets,
 }
 impl UiView {
     pub fn new(key: impl Into<String>) -> Self {
@@ -629,6 +630,7 @@ impl UiView {
             editing_text: None,
             input_scene: None,
             content_revision: 0,
+            form_assets: forms::Assets::default(),
         }
     }
     pub fn anchor(mut self, value: Anchor) -> Self {
@@ -814,6 +816,7 @@ impl UiView {
                 None,
                 &styles,
                 theme,
+                &mut self.form_assets,
             )?;
             if !self.state.pending_reveal.is_empty() {
                 let scene = interaction::InputScene::from(&prepared);
@@ -1014,6 +1017,7 @@ fn paint_tree(
     list: Option<&Widget>,
     styles: &HashMap<String, ResolvedStyle>,
     theme: &Theme,
+    form_assets: &mut forms::Assets,
 ) -> Result<(), LayoutError> {
     let visual = &styles[&widget.key];
     let padding = visual.padding;
@@ -1210,6 +1214,7 @@ fn paint_tree(
                 scroll_ancestors,
                 measure,
                 out,
+                form_assets,
             );
         }
         Kind::Button { text, action, .. } | Kind::ListItem { text, action, .. } => {
@@ -1486,6 +1491,7 @@ fn paint_tree(
             },
             styles,
             theme,
+            form_assets,
         )?;
     }
     Ok(())

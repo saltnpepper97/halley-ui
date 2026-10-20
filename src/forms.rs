@@ -2,6 +2,62 @@
 //! Retained boolean controls and single-choice radio groups.
 use super::*;
 use crate::{Key, UiEvent};
+use std::time::Duration;
+
+/// Small, bounded cache of font-independent checkbox marks, shared by repeated rows.
+#[derive(Default)]
+pub(super) struct Assets {
+    marks: HashMap<(u16, [u8; 4]), Arc<ImageData>>,
+}
+impl Assets {
+    fn checkmark(&mut self, size: f32, color: Color) -> Arc<ImageData> {
+        use resvg::tiny_skia::{LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
+        let dimension = size.ceil().clamp(1.0, 256.0) as u16;
+        let rgb = color.bytes();
+        let rgba = [
+            rgb[0],
+            rgb[1],
+            rgb[2],
+            (color.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+        ];
+        if let Some(mark) = self.marks.get(&(dimension, rgba)) {
+            return mark.clone();
+        }
+        let side = f32::from(dimension);
+        let mut path = PathBuilder::new();
+        path.move_to(side * 0.25, side * 0.52);
+        path.line_to(side * 0.42, side * 0.69);
+        path.line_to(side * 0.75, side * 0.31);
+        let mut pixels = Pixmap::new(u32::from(dimension), u32::from(dimension)).unwrap();
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(rgba[0], rgba[1], rgba[2], rgba[3]);
+        pixels.stroke_path(
+            &path.finish().unwrap(),
+            &paint,
+            &Stroke {
+                width: side * 0.105,
+                line_cap: LineCap::Round,
+                line_join: LineJoin::Round,
+                ..Default::default()
+            },
+            Transform::identity(),
+            None,
+        );
+        let mark = Arc::new(
+            ImageData::from_rgba(
+                u32::from(dimension),
+                u32::from(dimension),
+                pixels.take().into(),
+            )
+            .unwrap(),
+        );
+        if self.marks.len() >= 32 {
+            self.marks.clear();
+        }
+        self.marks.insert((dimension, rgba), mark.clone());
+        mark
+    }
+}
 
 macro_rules! boolean_control {
     ($name:ident, $kind:ident) => {
@@ -241,11 +297,20 @@ impl UiView {
             state: &mut crate::input::State,
             checks: &mut HashSet<String>,
             groups: &mut HashSet<String>,
+            switches: &mut HashSet<String>,
         ) {
             match &widget.kind {
                 Kind::Checkbox { initial, .. } | Kind::Switch { initial, .. } => {
                     checks.insert(widget.key.clone());
                     state.checked.entry(widget.key.clone()).or_insert(*initial);
+                    if matches!(widget.kind, Kind::Switch { .. }) {
+                        switches.insert(widget.key.clone());
+                        let checked = state.checked[&widget.key];
+                        state
+                            .switches
+                            .entry(widget.key.clone())
+                            .or_insert_with(|| crate::input::SwitchMotion::new(checked));
+                    }
                 }
                 Kind::RadioGroup {
                     initial_selection, ..
@@ -267,14 +332,71 @@ impl UiView {
                 _ => {}
             }
             for child in &widget.children {
-                visit(child, state, checks, groups);
+                visit(child, state, checks, groups, switches);
             }
         }
         let mut checks = HashSet::new();
         let mut groups = HashSet::new();
-        visit(&self.root, &mut self.state, &mut checks, &mut groups);
+        let mut switches = HashSet::new();
+        visit(
+            &self.root,
+            &mut self.state,
+            &mut checks,
+            &mut groups,
+            &mut switches,
+        );
         self.state.checked.retain(|key, _| checks.contains(key));
         self.state.radios.retain(|key, _| groups.contains(key));
+        self.state.switches.retain(|key, _| switches.contains(key));
+    }
+    /// Opt into host-clock-driven switch motion. Zero snaps immediately (the default).
+    pub fn set_switch_animation_duration(&mut self, duration: Duration) {
+        if self.state.switch_duration == duration {
+            return;
+        }
+        self.state.switch_duration = duration;
+        if duration.is_zero() {
+            let active = self.has_animations();
+            for motion in self.state.switches.values_mut() {
+                motion.snap();
+            }
+            if active {
+                self.invalidate();
+            }
+        } else {
+            for motion in self
+                .state
+                .switches
+                .values_mut()
+                .filter(|motion| motion.active())
+            {
+                motion.retime();
+            }
+        }
+    }
+    pub fn has_animations(&self) -> bool {
+        self.state
+            .switches
+            .values()
+            .any(crate::input::SwitchMotion::active)
+    }
+    /// Advance visual motion without changing values, input geometry, or emitting events.
+    pub fn advance_animations(&mut self, delta: Duration) -> bool {
+        self.sync_state();
+        let mut changed = false;
+        for motion in self.state.switches.values_mut() {
+            changed |= motion.advance(delta, self.state.switch_duration);
+        }
+        if changed {
+            self.invalidate();
+        }
+        changed
+    }
+    fn update_checked(&mut self, key: &str, checked: bool) {
+        self.state.checked.insert(key.into(), checked);
+        if let Some(motion) = self.state.switches.get_mut(key) {
+            motion.retarget(checked, self.state.switch_duration);
+        }
     }
     pub fn checked(&self, key: &str) -> Option<bool> {
         self.state.checked.get(key).copied()
@@ -284,7 +406,7 @@ impl UiView {
         self.sync_state();
         let scene = self
             .input_scene
-            .as_ref()
+            .clone()
             .ok_or(InteractionError::NotPrepared)?;
         if !scene
             .controls
@@ -293,9 +415,10 @@ impl UiView {
         {
             return Err(InteractionError::NotCheckable(key.into()));
         }
-        let changed = self.state.checked.insert(key.into(), value) != Some(value);
+        let changed = self.checked(key) != Some(value);
         if changed {
-            self.cancel_form_press(key, scene.clone());
+            self.update_checked(key, value);
+            self.cancel_form_press(key, scene);
             self.invalidate();
         }
         Ok(changed)
@@ -366,7 +489,7 @@ impl UiView {
         match &control.kind {
             ControlKind::Checkbox | ControlKind::Switch => {
                 let checked = !self.checked(&control.key).unwrap_or(false);
-                self.state.checked.insert(control.key.clone(), checked);
+                self.update_checked(&control.key, checked);
                 out.push(UiEvent::CheckedChanged {
                     key: control.key.clone(),
                     checked,
@@ -420,11 +543,12 @@ pub(super) fn paint_choice(
     clip: Rect,
     namespace: &str,
     visual: &ResolvedStyle,
-    state: &crate::input::State,
+    state: &mut crate::input::State,
     theme: &Theme,
     ancestors: &[String],
     measure: &mut impl FnMut(&Font, &str, Color) -> Size,
     out: &mut PreparedView,
+    assets: &mut Assets,
 ) {
     let key = format!("{namespace}/{}", widget.key);
     let (text, kind) = match &widget.kind {
@@ -445,28 +569,32 @@ pub(super) fn paint_choice(
         size.width,
         size.height,
     );
-    out.items.push(PaintItem::Card {
-        key: format!("{key}/indicator"),
-        rect: indicator_rect,
-        clip,
-        style: visual.surface,
-    });
     let checked = match &kind {
         ControlKind::RadioOption { group } => {
             state.radios.get(group).and_then(|v| v.as_deref()) == Some(widget.key.as_str())
         }
         _ => state.checked.get(&widget.key).copied().unwrap_or(false),
     };
+    let mut position = f32::from(checked);
+    let mut surface = visual.surface;
+    if matches!(kind, ControlKind::Switch)
+        && let Some(motion) = state.switches.get_mut(&widget.key)
+    {
+        position = motion.position;
+        surface.fill = motion.fill(surface.fill);
+    }
+    out.items.push(PaintItem::Card {
+        key: format!("{key}/indicator"),
+        rect: indicator_rect,
+        clip,
+        style: surface,
+    });
     let inset = size.height * 0.22;
     let dot = (size.height - 2.0 * inset).max(0.0);
     if matches!(kind, ControlKind::Switch)
         || (checked && matches!(kind, ControlKind::RadioOption { .. }))
     {
-        let x = if checked && matches!(kind, ControlKind::Switch) {
-            size.width - inset - dot
-        } else {
-            inset
-        };
+        let x = inset + (size.width - inset * 2.0 - dot) * position;
         out.items.push(PaintItem::Card {
             key: format!("{key}/mark"),
             rect: Rect::new(
@@ -484,21 +612,11 @@ pub(super) fn paint_choice(
             },
         });
     } else if checked {
-        let mut mark_font = visual.font.clone();
-        mark_font.size = (size.height * 0.85).round().clamp(1.0, u16::MAX as f32) as u16;
-        let measured = measure(&mark_font, "✓", visual.text);
-        out.items.push(PaintItem::Text {
+        out.items.push(PaintItem::Image {
             key: format!("{key}/mark"),
-            rect: Rect::new(
-                indicator_rect.origin.x + (size.width - measured.width).max(0.0) * 0.5,
-                indicator_rect.origin.y + (size.height - measured.height).max(0.0) * 0.5,
-                measured.width,
-                measured.height,
-            ),
+            rect: indicator_rect,
             clip: clip.intersection(indicator_rect),
-            text: "✓".into(),
-            font: mark_font,
-            color: visual.text,
+            data: assets.checkmark(size.height, visual.text),
         });
     }
     let left = size.width + theme.forms.indicator_gap;

@@ -1,7 +1,7 @@
 #![doc = include_str!("../docs/input.md")]
 //! Host-neutral input. The host translates events and performs clipboard/IME requests.
-use crate::{Point, Rect, ui::ActionId};
-use std::{collections::HashMap, ops::Range};
+use crate::{Color, Point, Rect, ui::ActionId};
+use std::{collections::HashMap, ops::Range, time::Duration};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -244,8 +244,92 @@ fn next_word(text: &str, cursor: usize) -> usize {
         .find(|i| *i > cursor)
         .unwrap_or(text.len())
 }
+pub(crate) struct SwitchMotion {
+    pub position: f32,
+    from: f32,
+    target: f32,
+    elapsed: Duration,
+    fraction: f32,
+    from_fill: Option<Color>,
+    last_fill: Option<Color>,
+}
+impl SwitchMotion {
+    pub fn new(checked: bool) -> Self {
+        let value = f32::from(checked);
+        Self {
+            position: value,
+            from: value,
+            target: value,
+            elapsed: Duration::ZERO,
+            fraction: 1.0,
+            from_fill: None,
+            last_fill: None,
+        }
+    }
+    pub fn active(&self) -> bool {
+        self.position != self.target
+    }
+    pub fn snap(&mut self) {
+        self.position = self.target;
+        self.fraction = 1.0;
+    }
+    pub fn retarget(&mut self, checked: bool, duration: Duration) {
+        let target = f32::from(checked);
+        if self.target == target {
+            return;
+        }
+        self.target = target;
+        self.retime();
+        if duration.is_zero() {
+            self.snap();
+        }
+    }
+    pub fn retime(&mut self) {
+        self.from = self.position;
+        self.elapsed = Duration::ZERO;
+        self.fraction = 0.0;
+        self.from_fill = self.last_fill;
+    }
+    pub fn advance(&mut self, delta: Duration, duration: Duration) -> bool {
+        if !self.active() || delta.is_zero() {
+            return false;
+        }
+        self.elapsed = self.elapsed.saturating_add(delta).min(duration);
+        let t = if duration.is_zero() {
+            1.0
+        } else {
+            self.elapsed.as_secs_f32() / duration.as_secs_f32()
+        };
+        self.fraction = 1.0 - (1.0 - t).powi(3);
+        self.position = if t >= 1.0 {
+            self.target
+        } else {
+            self.from + (self.target - self.from) * self.fraction
+        };
+        true
+    }
+    pub fn fill(&mut self, target: Color) -> Color {
+        let color = if self.active() {
+            let from = self.from_fill.unwrap_or(target);
+            let mix = |a: f32, b: f32| a + (b - a) * self.fraction;
+            Color::rgba(
+                mix(from.r, target.r),
+                mix(from.g, target.g),
+                mix(from.b, target.b),
+                mix(from.a, target.a),
+            )
+        } else {
+            target
+        };
+        self.last_fill = Some(color);
+        color
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct State {
+    pub switch_duration: Duration,
+    pub switches: HashMap<String, SwitchMotion>,
     pub checked: HashMap<String, bool>,
     pub radios: HashMap<String, Option<String>>,
     pub choice_space: Option<String>,
