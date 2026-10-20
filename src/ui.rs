@@ -380,6 +380,8 @@ container!(Scroll, Kind::Scroll);
 #[path = "lists.rs"]
 mod lists;
 pub use lists::{InteractionError, List, ListItem};
+#[path = "overlays.rs"]
+pub mod overlays;
 
 /// Icons use this same component after decoding through `assets::ImageData`.
 #[derive(Clone, Debug)]
@@ -466,6 +468,9 @@ pub enum SemanticRole {
     Scroll,
     List,
     ListItem,
+    Menu,
+    MenuItem,
+    Dialog,
 }
 #[derive(Clone, Debug)]
 pub struct SemanticNode {
@@ -482,6 +487,7 @@ pub struct SemanticNode {
     pub selected: Option<bool>,
     pub active_descendant: Option<String>,
     pub invalid: bool,
+    pub modal: bool,
 }
 #[derive(Clone, Debug, Default)]
 pub struct PreparedView {
@@ -1015,6 +1021,7 @@ fn paint_tree(
         read_only,
         selection,
         invalid: widget.invalid,
+        modal: false,
         selected: if matches!(widget.kind, Kind::ListItem { .. }) {
             Some(list.is_some_and(|l| {
                 state.lists.get(&l.key).and_then(|s| s.as_deref()) == Some(widget.key.as_str())

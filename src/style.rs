@@ -58,6 +58,8 @@ pub struct ComponentStyles {
     pub text_input: StyleSheet,
     pub list: StyleSheet,
     pub list_item: StyleSheet,
+    pub menu: StyleSheet,
+    pub menu_item: StyleSheet,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -115,6 +117,7 @@ pub struct Theme {
     pub spacing: Spacing,
     pub typography: Typography,
     pub styles: ComponentStyles,
+    pub overlays: super::overlays::OverlayTheme,
 }
 impl Default for Theme {
     fn default() -> Self {
@@ -141,6 +144,7 @@ impl Default for Theme {
             spacing: Spacing::default(),
             typography: Typography::default(),
             styles: ComponentStyles::default(),
+            overlays: super::overlays::OverlayTheme::default(),
         }
     }
 }
@@ -258,13 +262,15 @@ impl Theme {
                 &self.styles.text_input,
                 &self.styles.list,
                 &self.styles.list_item,
+                &self.styles.menu,
+                &self.styles.menu_item,
             ]
             .into_iter()
             .all(StyleSheet::valid)
         {
             return Err(LayoutError::InvalidStyle("theme".into()));
         }
-        Ok(())
+        self.overlays.validate()
     }
 }
 

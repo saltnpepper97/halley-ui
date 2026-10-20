@@ -1,7 +1,10 @@
 # Themes and component styles
 
 `Theme` supplies base colors, the body font, spacing defaults, typography roles,
-and component rules for buttons, text inputs, lists, and list options. The default
+and component rules for buttons, text inputs, lists, and list options. Menus have
+independent `styles.menu` and `styles.menu_item` rules; `Theme::overlays` supplies
+overlay surfaces, padding, and the modal backdrop. See the
+[overlay guide](components/overlays.md). The default
 theme preserves the existing appearance. Styling changes paint and layout data;
 it does not own application state, native events, or the window's theme settings.
 
@@ -124,7 +127,8 @@ Construct themes with `Theme { ... , ..Default::default() }` or mutate
 `Theme::default()`. Existing base fields (`font`, `text`, `subtext`, `card`,
 `button`, `button_hover`, `button_pressed`) still provide component defaults.
 Complete struct literals need the new `error`, `spacing`, `typography`, and
-`styles` fields. `SemanticNode` now includes `invalid`.
+`styles`, and `overlays` fields; complete `ComponentStyles` literals also need
+`menu` and `menu_item`. `SemanticNode` now includes `invalid` and `modal`.
 
 `PreparedView::button_visuals` has been removed. Forward pointer/keyboard input
 through the retained `UiView`, then prepare and draw its result. This resolves

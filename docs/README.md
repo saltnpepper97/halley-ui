@@ -12,6 +12,7 @@ translate your host's input events into the toolkit's event types.
 - [TextInput](components/text-input.md): values, selection, clipboard, and composition.
 - [Scroll](components/scroll.md): viewports, wheel movement, and focus reveal.
 - [List and ListItem](components/list.md): selection, keyboard navigation, and focus control.
+- [Overlays](components/overlays.md): popovers, menus, modal dialogs, and input scopes.
 - [Image and icons](components/image.md): decoded assets and aspect ratio.
 
 ## Host integration

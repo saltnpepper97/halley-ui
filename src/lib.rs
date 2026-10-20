@@ -14,10 +14,15 @@ pub mod software;
 pub mod text;
 pub mod ui;
 
+pub use overlays::{
+    CloseReason, Dialog, LayerEvent, LayerId, Menu, MenuItem, Overlay, OverlayAnchor, OverlayError,
+    OverlayKind, OverlayTheme, Placement, Popover, UiStack,
+};
 pub use style::{
     CardStyle, ComponentStyles, Outline, Spacing, Style, StyleSheet, TextRole, Typography,
     WidgetState,
 };
+pub use ui::overlays;
 pub use ui::style;
 
 pub use geometry::{Color, Insets, Point, Rect, Size};
