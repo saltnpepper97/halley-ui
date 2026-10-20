@@ -4,8 +4,8 @@ use crate::input::{Editor, InputEvent, Key, Modifiers, UiEvent};
 
 #[derive(Clone, Default)]
 pub(super) struct InputScene {
-    controls: Vec<ControlRegion>,
-    scrolls: Vec<ScrollRegion>,
+    pub(super) controls: Vec<ControlRegion>,
+    pub(super) scrolls: Vec<ScrollRegion>,
 }
 impl From<&PreparedView> for InputScene {
     fn from(view: &PreparedView) -> Self {
@@ -23,6 +23,7 @@ impl UiView {
             inputs: &mut HashSet<String>,
             scrolls: &mut HashSet<String>,
             focusable: &mut HashSet<String>,
+            inherited_disabled: bool,
         ) {
             match &widget.kind {
                 Kind::TextInput {
@@ -36,17 +37,26 @@ impl UiView {
                         .editors
                         .entry(widget.key.clone())
                         .or_insert_with(|| Editor::new(initial));
-                    if *disabled || *read_only {
+                    if *disabled || *read_only || inherited_disabled {
                         editor.preedit = None;
                     }
-                    if !disabled {
+                    if !disabled && !inherited_disabled {
                         focusable.insert(widget.key.clone());
                     }
                 }
                 Kind::Button {
                     disabled: false, ..
-                } => {
+                }
+                | Kind::ListItem {
+                    disabled: false, ..
+                } if !inherited_disabled => {
                     focusable.insert(widget.key.clone());
+                }
+                Kind::List { disabled, .. } => {
+                    scrolls.insert(widget.key.clone());
+                    if !disabled && !inherited_disabled {
+                        focusable.insert(widget.key.clone());
+                    }
                 }
                 Kind::Scroll => {
                     scrolls.insert(widget.key.clone());
@@ -54,9 +64,17 @@ impl UiView {
                 _ => {}
             }
             for child in &widget.children {
-                visit(child, state, inputs, scrolls, focusable);
+                visit(
+                    child,
+                    state,
+                    inputs,
+                    scrolls,
+                    focusable,
+                    inherited_disabled || matches!(widget.kind, Kind::List { disabled: true, .. }),
+                );
             }
         }
+        self.sync_lists();
         let mut inputs = HashSet::new();
         let mut scrolls = HashSet::new();
         let mut focusable = HashSet::new();
@@ -66,6 +84,7 @@ impl UiView {
             &mut inputs,
             &mut scrolls,
             &mut focusable,
+            false,
         );
         self.state.editors.retain(|key, _| inputs.contains(key));
         self.state.scroll.retain(|key, _| scrolls.contains(key));
@@ -158,7 +177,16 @@ impl UiView {
             }
             InputEvent::PointerDown { position, shift } => {
                 let control = hit(position);
-                self.change_focus(control.map(|c| c.key.clone()), &scene, &mut out);
+                let focus = control.map(|c| match &c.kind {
+                    ControlKind::ListItem { list, .. } => list.clone(),
+                    _ => c.key.clone(),
+                });
+                self.change_focus(focus, &mut out);
+                if let Some(control) = control
+                    && let ControlKind::ListItem { list, .. } = &control.kind
+                {
+                    let _ = self.select_in(list, Some(&control.key), &scene, &mut out);
+                }
                 self.state.pressed = control.map(|c| c.key.clone());
                 self.state.dragging = false;
                 if let Some(control) = control
@@ -191,7 +219,8 @@ impl UiView {
                 if !self.state.dragging
                     && let Some(control) = hit(position)
                     && self.state.pressed.as_deref() == Some(control.key.as_str())
-                    && let ControlKind::Button(action) = &control.kind
+                    && let ControlKind::Button(action) | ControlKind::ListItem { action, .. } =
+                        &control.kind
                 {
                     out.push(UiEvent::Activate(action.clone()));
                 }
@@ -206,12 +235,11 @@ impl UiView {
                 if delta.x.is_finite() && delta.y.is_finite() {
                     // Deepest viewport first; unconsumed movement bubbles to its ancestors.
                     let mut remaining = delta;
-                    for scroll in scene
-                        .scrolls
-                        .iter()
-                        .rev()
-                        .filter(|s| s.viewport.contains(position) && s.clip.contains(position))
-                    {
+                    for scroll in scene.scrolls.iter().rev().filter(|s| {
+                        s.viewport.contains(position)
+                            && s.clip.contains(position)
+                            && !scene.controls.iter().any(|c| c.key == s.key && c.disabled)
+                    }) {
                         let offset = self.state.scroll.entry(scroll.key.clone()).or_default();
                         let before = *offset;
                         offset.x = (offset.x + remaining.x).clamp(
@@ -232,7 +260,11 @@ impl UiView {
                 modifiers,
             } => {
                 if !modifiers.control && !modifiers.alt {
-                    let controls: Vec<_> = scene.controls.iter().filter(|c| !c.disabled).collect();
+                    let controls: Vec<_> = scene
+                        .controls
+                        .iter()
+                        .filter(|c| !c.disabled && !matches!(c.kind, ControlKind::ListItem { .. }))
+                        .collect();
                     if !controls.is_empty() {
                         let current = controls
                             .iter()
@@ -243,7 +275,7 @@ impl UiView {
                             (Some(i), false) => (i + 1) % controls.len(),
                             (None, false) => 0,
                         };
-                        self.change_focus(Some(controls[index].key.clone()), &scene, &mut out);
+                        self.change_focus(Some(controls[index].key.clone()), &mut out);
                     }
                 }
             }
@@ -273,6 +305,25 @@ impl UiView {
                             match key {
                                 Key::Enter => out.push(UiEvent::Activate(action.clone())),
                                 Key::Space => self.state.pressed = Some(control.key.clone()),
+                                _ => {}
+                            }
+                        }
+                        ControlKind::List
+                            if !modifiers.control && !modifiers.alt && !modifiers.shift =>
+                        {
+                            match key {
+                                Key::Up
+                                | Key::Down
+                                | Key::PageUp
+                                | Key::PageDown
+                                | Key::Home
+                                | Key::End => {
+                                    let _ =
+                                        self.navigate_list_in(&control.key, key, &scene, &mut out);
+                                }
+                                Key::Enter => out.extend(
+                                    self.activate_selected(&control.key).unwrap_or_default(),
+                                ),
                                 _ => {}
                             }
                         }
@@ -394,7 +445,7 @@ impl UiView {
         }
         out
     }
-    fn change_focus(&mut self, key: Option<String>, scene: &InputScene, out: &mut Vec<UiEvent>) {
+    pub(super) fn change_focus(&mut self, key: Option<String>, out: &mut Vec<UiEvent>) {
         if self.state.focus != key {
             if let Some(editor) = self
                 .state
@@ -407,18 +458,26 @@ impl UiView {
             self.state.focus = key;
             self.state.pending_paste = None;
             self.state.pressed = None;
+            self.state.dragging = false;
             out.push(UiEvent::FocusChanged(self.state.focus.clone()));
         }
         if let Some(key) = &self.state.focus {
-            self.reveal_key(key.clone(), scene);
+            self.state.pending_reveal.push(key.clone());
+            if let Some(Some(selected)) = self.state.lists.get(key) {
+                self.state.pending_reveal.push(selected.clone());
+            }
         }
     }
-    fn reveal_key(&mut self, key: String, scene: &InputScene) {
+    pub(super) fn reveal_key(&mut self, key: String, scene: &InputScene) {
         if let Some(control) = scene.controls.iter().find(|c| c.key == key) {
             let mut target = control.rect;
             for ancestor in control.scroll_ancestors.iter().rev() {
                 if let Some(scroll) = scene.scrolls.iter().find(|s| &s.key == ancestor) {
                     let offset = self.state.scroll.entry(ancestor.clone()).or_default();
+                    target = target.translated(Point::new(
+                        scroll.offset.x - offset.x,
+                        scroll.offset.y - offset.y,
+                    ));
                     let before = *offset;
                     let reveal = |start: f32, size: f32, v_start: f32, v_size: f32| {
                         if start < v_start {
@@ -561,13 +620,24 @@ impl UiView {
         match action {
             AccessibleAction::Focus(key) => {
                 if scene.controls.iter().any(|c| c.key == key && !c.disabled) {
-                    self.change_focus(Some(key), &scene, &mut out);
+                    if let Some(control) = scene.controls.iter().find(|c| c.key == key)
+                        && let ControlKind::ListItem { list, .. } = &control.kind
+                    {
+                        let _ = self.select_in(list, Some(&key), &scene, &mut out);
+                        self.change_focus(Some(list.clone()), &mut out);
+                    } else {
+                        self.change_focus(Some(key), &mut out);
+                    }
                 }
             }
             AccessibleAction::Activate(key) => {
                 if let Some(control) = scene.controls.iter().find(|c| c.key == key && !c.disabled)
-                    && let ControlKind::Button(action) = &control.kind
+                    && let ControlKind::Button(action) | ControlKind::ListItem { action, .. } =
+                        &control.kind
                 {
+                    if let ControlKind::ListItem { list, .. } = &control.kind {
+                        let _ = self.select_in(list, Some(&key), &scene, &mut out);
+                    }
                     out.push(UiEvent::Activate(action.clone()));
                 }
             }
@@ -607,6 +677,7 @@ impl UiView {
             AccessibleAction::Scroll { key, x, y } => {
                 if x.is_finite()
                     && y.is_finite()
+                    && !scene.controls.iter().any(|c| c.key == key && c.disabled)
                     && let Some(scroll) = scene.scrolls.iter().find(|s| s.key == key)
                 {
                     self.state.scroll.insert(
@@ -625,7 +696,7 @@ impl UiView {
                 }
             }
             AccessibleAction::Reveal(key) => {
-                self.reveal_key(key, &scene);
+                self.state.pending_reveal.push(key);
             }
         }
         self.invalidate();

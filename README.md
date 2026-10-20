@@ -50,7 +50,7 @@ is true. For a translated snapshot, use `handle_event_in` and `ime_state_in`
 with that same snapshot so paint, hits, and IME geometry agree.
 
 - **Components:** cards, containers, rows, columns, labels, buttons, images,
-  single-line text inputs, and clipped scroll containers.
+  single-line text inputs, clipped scroll containers, and selectable lists.
 - **Drawing:** use an owned `PixelBuffer` or borrow existing RGBA/BGRA pixels
   with `Surface::new`. Buffers use premultiplied alpha and support padded stride.
 - **Host renderers:** consume `PreparedView::items` or supply existing glyph

@@ -138,6 +138,16 @@ enum Kind {
         read_only: bool,
     },
     Scroll,
+    List {
+        initial_selection: Option<String>,
+        selection_color: Option<Color>,
+        disabled: bool,
+    },
+    ListItem {
+        text: String,
+        action: ActionId,
+        disabled: bool,
+    },
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Widget {
@@ -368,6 +378,10 @@ impl From<TextInput> for Widget {
 }
 container!(Scroll, Kind::Scroll);
 
+#[path = "lists.rs"]
+mod lists;
+pub use lists::{InteractionError, List, ListItem};
+
 /// Icons use this same component after decoding through `assets::ImageData`.
 #[derive(Clone, Debug)]
 pub struct Image(Widget);
@@ -418,6 +432,8 @@ pub struct HitRegion {
 pub enum ControlKind {
     Button(ActionId),
     TextInput { read_only: bool },
+    List,
+    ListItem { list: String, action: ActionId },
 }
 #[derive(Clone, Debug)]
 pub struct ControlRegion {
@@ -449,6 +465,8 @@ pub enum SemanticRole {
     TextInput,
     Image,
     Scroll,
+    List,
+    ListItem,
 }
 #[derive(Clone, Debug)]
 pub struct SemanticNode {
@@ -462,6 +480,8 @@ pub struct SemanticNode {
     pub disabled: bool,
     pub read_only: bool,
     pub selection: Option<(usize, usize)>,
+    pub selected: Option<bool>,
+    pub active_descendant: Option<String>,
 }
 #[derive(Clone, Debug, Default)]
 pub struct PreparedView {
@@ -550,6 +570,8 @@ pub enum LayoutError {
     DuplicateKey(String),
     #[error("layout bounds and style values must be finite and nonnegative")]
     InvalidGeometry,
+    #[error("list items must belong directly to a List and contain only presentation widgets: {0}")]
+    InvalidListItem(String),
     #[error("Taffy layout: {0}")]
     Taffy(#[from] taffy::TaffyError),
 }
@@ -645,6 +667,7 @@ impl UiView {
         theme: &Theme,
         mut measure: impl FnMut(&Font, &str, Color) -> Size,
     ) -> Result<&PreparedView, LayoutError> {
+        lists::validate(&self.root, false, false)?;
         self.sync_state();
         if self
             .cached
@@ -705,9 +728,9 @@ impl UiView {
                             value,
                             color.unwrap_or(theme.text),
                         ),
-                        Some(Kind::Button { text: value, .. }) => {
-                            measure(&theme.font, value, theme.text)
-                        }
+                        Some(
+                            Kind::Button { text: value, .. } | Kind::ListItem { text: value, .. },
+                        ) => measure(&theme.font, value, theme.text),
                         Some(Kind::TextInput { initial, .. }) => {
                             let size = measure(
                                 &theme.font,
@@ -734,54 +757,69 @@ impl UiView {
         let origin = self
             .anchor
             .position(bounds, Size::new(size.width, size.height), self.margin);
-        let mut prepared = PreparedView {
-            bounds: Rect {
+        // A reveal request is resolved against fresh geometry, then painted once more
+        // if scrolling changed. Wheel-only updates never enqueue a reveal.
+        loop {
+            let mut prepared = PreparedView {
+                bounds: Rect {
+                    origin,
+                    size: Size::new(size.width, size.height),
+                },
+                focused: if self.state.window_focused {
+                    self.state.focus.clone()
+                } else {
+                    None
+                },
+                namespace: self.key.clone(),
+                content_revision: self.content_revision,
+                ..Default::default()
+            };
+            paint_tree(
+                &tree,
+                &nodes,
+                &self.root,
                 origin,
-                size: Size::new(size.width, size.height),
-            },
-            focused: if self.state.window_focused {
-                self.state.focus.clone()
-            } else {
-                None
-            },
-            namespace: self.key.clone(),
-            content_revision: self.content_revision,
-            ..Default::default()
-        };
-        paint_tree(
-            &tree,
-            &nodes,
-            &self.root,
-            origin,
-            bounds,
-            &self.key,
-            theme,
-            &mut measure,
-            &mut prepared,
-            &mut self.state,
-            &mut self.editing_text,
-            &[],
-        )?;
-        prepared.button_visuals(
-            theme,
-            self.state
-                .hover
-                .as_ref()
-                .map(|key| format!("{}/{}", self.key, key))
-                .as_deref(),
-            self.state
-                .pressed
-                .as_ref()
-                .map(|key| format!("{}/{}", self.key, key))
-                .as_deref(),
-        );
-        self.input_scene = Some(interaction::InputScene::from(&prepared));
-        self.cached = Some(Cached {
-            bounds,
-            theme: theme.clone(),
-            prepared,
-        });
-        Ok(&self.cached.as_ref().unwrap().prepared)
+                bounds,
+                &self.key,
+                theme,
+                &mut measure,
+                &mut prepared,
+                &mut self.state,
+                &mut self.editing_text,
+                &[],
+                None,
+            )?;
+            if !self.state.pending_reveal.is_empty() {
+                let scene = interaction::InputScene::from(&prepared);
+                let before = self.state.visual_fingerprint();
+                for key in std::mem::take(&mut self.state.pending_reveal) {
+                    self.reveal_key(key, &scene);
+                }
+                if before != self.state.visual_fingerprint() {
+                    continue;
+                }
+            }
+            prepared.button_visuals(
+                theme,
+                self.state
+                    .hover
+                    .as_ref()
+                    .map(|key| format!("{}/{}", self.key, key))
+                    .as_deref(),
+                self.state
+                    .pressed
+                    .as_ref()
+                    .map(|key| format!("{}/{}", self.key, key))
+                    .as_deref(),
+            );
+            self.input_scene = Some(interaction::InputScene::from(&prepared));
+            self.cached = Some(Cached {
+                bounds,
+                theme: theme.clone(),
+                prepared,
+            });
+            return Ok(&self.cached.as_ref().unwrap().prepared);
+        }
     }
 }
 fn build_tree(
@@ -848,7 +886,7 @@ fn build_tree(
             width: l.max_width.map(tf::length).unwrap_or(tf::auto()),
             height: l.max_height.map(tf::length).unwrap_or(tf::auto()),
         },
-        overflow: if matches!(widget.kind, Kind::Scroll) {
+        overflow: if matches!(widget.kind, Kind::Scroll | Kind::List { .. }) {
             taffy::geometry::Point {
                 x: taffy::Overflow::Scroll,
                 y: taffy::Overflow::Scroll,
@@ -868,7 +906,7 @@ fn build_tree(
         .iter()
         .map(|child| build_tree(tree, child, nodes, keys, state))
         .collect::<Result<Vec<_>, _>>()?;
-    if matches!(widget.kind, Kind::Scroll) {
+    if matches!(widget.kind, Kind::Scroll | Kind::List { .. }) {
         for child in &children {
             let mut child_style = tree.style(*child)?.clone();
             child_style.flex_shrink = 0.0;
@@ -916,6 +954,7 @@ fn paint_tree(
     state: &mut crate::input::State,
     editing_text: &mut Option<TextSystem>,
     scroll_ancestors: &[String],
+    list: Option<&Widget>,
 ) -> Result<(), LayoutError> {
     let layout = tree.layout(nodes[&widget.key])?;
     let rect = Rect::new(
@@ -936,6 +975,14 @@ fn paint_tree(
     );
     let (role, value, disabled, read_only, selection) = match &widget.kind {
         Kind::Label { text, .. } => (SemanticRole::Label, Some(text.clone()), false, false, None),
+        Kind::List { disabled, .. } => (SemanticRole::List, None, *disabled, false, None),
+        Kind::ListItem { text, disabled, .. } => (
+            SemanticRole::ListItem,
+            Some(text.clone()),
+            *disabled || list.is_some_and(|l| matches!(l.kind, Kind::List { disabled: true, .. })),
+            false,
+            None,
+        ),
         Kind::Button { text, disabled, .. } => (
             SemanticRole::Button,
             Some(text.clone()),
@@ -968,6 +1015,18 @@ fn paint_tree(
         disabled,
         read_only,
         selection,
+        selected: if matches!(widget.kind, Kind::ListItem { .. }) {
+            Some(list.is_some_and(|l| {
+                state.lists.get(&l.key).and_then(|s| s.as_deref()) == Some(widget.key.as_str())
+            }))
+        } else {
+            None
+        },
+        active_descendant: if matches!(widget.kind, Kind::List { .. }) {
+            state.lists.get(&widget.key).cloned().flatten()
+        } else {
+            None
+        },
         label: widget.accessible_label.clone(),
         children: widget.children.iter().map(|c| c.key.clone()).collect(),
         rect,
@@ -1011,16 +1070,49 @@ fn paint_tree(
                 color: color.unwrap_or(theme.text),
             });
         }
-        Kind::Button {
-            text,
-            action,
-            disabled,
-        } => {
+        Kind::List { disabled, .. } => {
+            out.controls.push(ControlRegion {
+                key: widget.key.clone(),
+                rect,
+                clip,
+                content,
+                kind: ControlKind::List,
+                disabled: *disabled,
+                scroll_ancestors: scroll_ancestors.to_vec(),
+                line: None,
+                text_origin: content.origin,
+                caret: Rect::default(),
+            });
+        }
+        Kind::Button { text, action, .. } | Kind::ListItem { text, action, .. } => {
+            let is_item = matches!(widget.kind, Kind::ListItem { .. });
+            let selected = list.is_some_and(|l| {
+                state.lists.get(&l.key).and_then(|s| s.as_deref()) == Some(widget.key.as_str())
+            });
+            let mut style = theme.button;
+            if is_item {
+                style.fill = if selected {
+                    list.and_then(|l| match l.kind {
+                        Kind::List {
+                            selection_color, ..
+                        } => selection_color,
+                        _ => None,
+                    })
+                    .unwrap_or(theme.button_pressed)
+                } else if state.hover.as_deref() == Some(widget.key.as_str()) && !disabled {
+                    theme.button_hover
+                } else {
+                    Color::rgba(0.0, 0.0, 0.0, 0.0)
+                };
+                if disabled {
+                    style.fill.a *= 0.5;
+                }
+            }
             out.items.push(PaintItem::Card {
                 key: key.clone(),
                 rect,
                 clip,
-                style: theme.button,
+                style,
             });
             let (text, size) = crate::text::fit_with_measure(
                 text,
@@ -1028,38 +1120,58 @@ fn paint_tree(
                 TextOverflow::EllipsisEnd,
                 |value| measure(&theme.font, value, theme.text),
             );
-            out.items.push(PaintItem::Text {
-                key: format!("{key}/label"),
-                rect: Rect::new(
-                    content.origin.x + (content.size.width - size.width).max(0.0) / 2.0,
-                    content.origin.y + (content.size.height - size.height).max(0.0) / 2.0,
-                    size.width,
-                    size.height,
-                ),
-                clip: content.intersection(clip),
-                text,
-                font: theme.font.clone(),
-                color: theme.text,
-            });
+            if !is_item || widget.children.is_empty() {
+                out.items.push(PaintItem::Text {
+                    key: format!("{key}/label"),
+                    rect: Rect::new(
+                        content.origin.x
+                            + if is_item {
+                                0.0
+                            } else {
+                                (content.size.width - size.width).max(0.0) / 2.0
+                            },
+                        content.origin.y + (content.size.height - size.height).max(0.0) / 2.0,
+                        size.width,
+                        size.height,
+                    ),
+                    clip: content.intersection(clip),
+                    text,
+                    font: theme.font.clone(),
+                    color: if is_item && disabled {
+                        theme.subtext
+                    } else {
+                        theme.text
+                    },
+                });
+            }
             out.controls.push(ControlRegion {
                 key: widget.key.clone(),
                 rect,
                 clip,
                 content,
-                kind: ControlKind::Button(action.clone()),
-                disabled: *disabled,
+                kind: if is_item {
+                    ControlKind::ListItem {
+                        list: list.unwrap().key.clone(),
+                        action: action.clone(),
+                    }
+                } else {
+                    ControlKind::Button(action.clone())
+                },
+                disabled,
                 scroll_ancestors: scroll_ancestors.to_vec(),
                 line: None,
                 text_origin: content.origin,
                 caret: Rect::default(),
             });
-            out.hits.push(HitRegion {
-                key,
-                rect,
-                clip,
-                action: action.clone(),
-                disabled: *disabled,
-            });
+            if !is_item {
+                out.hits.push(HitRegion {
+                    key,
+                    rect,
+                    clip,
+                    action: action.clone(),
+                    disabled,
+                });
+            }
         }
         Kind::Image { data } => {
             let scale = (content.size.width / data.width() as f32)
@@ -1214,7 +1326,7 @@ fn paint_tree(
     }
     if state.window_focused
         && state.focus.as_deref() == Some(widget.key.as_str())
-        && matches!(widget.kind, Kind::Button { .. })
+        && matches!(widget.kind, Kind::Button { .. } | Kind::List { .. })
     {
         out.items.push(PaintItem::Card {
             key: format!("{namespace}/{}/focus", widget.key),
@@ -1230,7 +1342,7 @@ fn paint_tree(
     }
     let mut child_origin = rect.origin;
     let mut ancestors = scroll_ancestors.to_vec();
-    if matches!(widget.kind, Kind::Scroll) {
+    if matches!(widget.kind, Kind::Scroll | Kind::List { .. }) {
         let mut extent = content.size;
         for child in &widget.children {
             let child_layout = tree.layout(nodes[&child.key])?;
@@ -1274,6 +1386,11 @@ fn paint_tree(
             state,
             editing_text,
             &ancestors,
+            if matches!(widget.kind, Kind::List { .. }) {
+                Some(widget)
+            } else {
+                list
+            },
         )?;
     }
     Ok(())

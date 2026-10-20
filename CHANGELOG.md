@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Add retained selectable lists with stable item keys, disabled options,
+  arrow/page navigation, automatic reveal, and selection separate from focus.
+- Add programmatic focus, selection, and selected-item activation APIs.
+- Expose AccessKit listbox/option semantics, selection, and active descendants.
+- Add list navigation, focus, scrolling, and accessibility regression coverage.
+- Add public key, event, control, and semantic enum variants for lists;
+  consumers with exhaustive matches must handle the new variants.
+
 ## 0.1.2
 
 - Skip transparent chrome and glyph pixels in the software renderer.
