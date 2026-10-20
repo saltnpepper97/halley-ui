@@ -22,7 +22,7 @@ impl List {
         self
     }
     pub fn gap(mut self, value: f32) -> Self {
-        self.0.layout.gap = value.max(0.0);
+        self.0.layout.gap = Some(value.max(0.0));
         self
     }
     /// Seeds selection once per list key; use `UiView::select` for later changes.
@@ -44,12 +44,18 @@ impl List {
         }
         self
     }
+    /// Shared partial overrides for this list's options; item overrides win.
+    pub fn item_style(mut self, style: StyleSheet) -> Self {
+        self.0.item_style = Some(Arc::new(style));
+        self
+    }
     pub fn disabled(mut self, value: bool) -> Self {
         if let Kind::List { disabled, .. } = &mut self.0.kind {
             *disabled = value;
         }
         self
     }
+    control_style_methods!();
     layout_methods!();
 }
 impl From<List> for Widget {
@@ -64,7 +70,7 @@ pub struct ListItem(Widget);
 impl ListItem {
     pub fn new(key: impl Into<String>, text: impl Into<String>) -> Self {
         let key = key.into();
-        let mut widget = Widget::new(
+        let widget = Widget::new(
             key.clone(),
             Kind::ListItem {
                 text: text.into(),
@@ -72,7 +78,6 @@ impl ListItem {
                 disabled: false,
             },
         );
-        widget.layout.padding = Insets::xy(12.0, 8.0);
         Self(widget)
     }
     /// Custom content replaces the painted label; the label remains the accessible name.
@@ -92,6 +97,7 @@ impl ListItem {
         }
         self
     }
+    control_style_methods!();
     layout_methods!();
 }
 impl From<ListItem> for Widget {

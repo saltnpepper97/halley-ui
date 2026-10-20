@@ -25,3 +25,7 @@ Use `Button::new("open", "").accessible_label("Open item").child(row)` for a
 button containing an image, title, subtitle, or shortcut hint. Its children use
 [Taffy](https://github.com/DioxusLabs/taffy) layout, and the full button remains
 the activation target.
+
+Use `style(StyleSheet)` for partial component overrides and `invalid(true)` for
+error appearance. Custom child labels inherit the button's state text color and
+font unless explicitly overridden. See [themes and styling](../styling.md).

@@ -51,6 +51,8 @@ with that same snapshot so paint, hits, and IME geometry agree.
 
 - **Components:** cards, containers, rows, columns, labels, buttons, images,
   single-line text inputs, clipped scroll containers, and selectable lists.
+- **Styling:** partial theme and widget rules for hover, press, focus, selection,
+  disabled, and error states, with shared spacing and typography defaults.
 - **Drawing:** use an owned `PixelBuffer` or borrow existing RGBA/BGRA pixels
   with `Surface::new`. Buffers use premultiplied alpha and support padded stride.
 - **Host renderers:** consume `PreparedView::items` or supply existing glyph

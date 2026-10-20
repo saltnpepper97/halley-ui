@@ -38,6 +38,42 @@ fn request(action: Action, id: NodeId, data: Option<ActionData>) -> ActionReques
 }
 
 #[test]
+fn validation_state_is_exposed_and_can_clear_without_disabling_the_editor() {
+    let content = |invalid| {
+        TextInput::new("name", "Original")
+            .accessible_label("Name")
+            .invalid(invalid)
+    };
+    let mut view = UiView::new("validation").content(content(true));
+    let scene = prepared(&mut view);
+    let mut tree = AccessibilityTree::default();
+    let update = tree.update(&scene, "Edit name");
+    let (id, input) = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::TextInput)
+        .unwrap();
+    let id = *id;
+    assert_eq!(
+        input.invalid(),
+        Some(halley_ui::accessibility::accesskit::Invalid::True)
+    );
+    assert!(!input.is_disabled());
+    assert!(input.supports_action(Action::SetValue));
+    let _ = accesskit_consumer::Tree::new(update, true);
+    view.focus("name").unwrap();
+    view.set_text_value("name", "Corrected");
+    view.set_content(content(false));
+    let scene = prepared(&mut view);
+    let update = tree.update(&scene, "Edit name");
+    let input = &update.nodes.iter().find(|(node, _)| *node == id).unwrap().1;
+    assert_eq!(input.invalid(), None);
+    assert_eq!(input.value(), Some("Corrected"));
+    assert_eq!(update.focus, id);
+    let _ = accesskit_consumer::Tree::new(update, true);
+}
+
+#[test]
 fn list_options_expose_selection_active_descendant_and_accessible_focus_and_activation() {
     use halley_ui::{List, ListItem};
     let content = |reverse| {
