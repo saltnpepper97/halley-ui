@@ -63,6 +63,9 @@ impl AccessibilityTree {
                 SemanticRole::Image => Role::Image,
                 SemanticRole::List => Role::ListBox,
                 SemanticRole::ListItem => Role::ListBoxOption,
+                SemanticRole::Menu => Role::Menu,
+                SemanticRole::MenuItem => Role::MenuItem,
+                SemanticRole::Dialog => Role::Dialog,
             };
             let mut node = Node::new(role);
             node.set_bounds(bounds(semantic.rect));
@@ -83,6 +86,9 @@ impl AccessibilityTree {
             if semantic.invalid {
                 node.set_invalid(accesskit::Invalid::True);
             }
+            if semantic.modal {
+                node.set_modal();
+            }
             if semantic.read_only {
                 node.set_read_only();
             }
@@ -93,7 +99,7 @@ impl AccessibilityTree {
                 node.set_active_descendant(self.id(key, 0));
             }
             match semantic.role {
-                SemanticRole::Button | SemanticRole::ListItem => {
+                SemanticRole::Button | SemanticRole::ListItem | SemanticRole::MenuItem => {
                     if semantic.label.is_none()
                         && let Some(value) = &semantic.value
                     {
@@ -151,8 +157,10 @@ impl AccessibilityTree {
                     }
                     nodes.push((run_id, run));
                 }
-                SemanticRole::Scroll | SemanticRole::List => {
-                    if matches!(semantic.role, SemanticRole::List) && !semantic.disabled {
+                SemanticRole::Scroll | SemanticRole::List | SemanticRole::Menu => {
+                    if matches!(semantic.role, SemanticRole::List | SemanticRole::Menu)
+                        && !semantic.disabled
+                    {
                         node.add_action(Action::Focus);
                     }
                     if let Some(scroll) = prepared

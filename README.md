@@ -51,6 +51,8 @@ with that same snapshot so paint, hits, and IME geometry agree.
 
 - **Components:** cards, containers, rows, columns, labels, buttons, images,
   single-line text inputs, clipped scroll containers, and selectable lists.
+- **Overlays:** `UiStack` composes popovers, menus, and modal dialogs with placement,
+  dismissal, scoped input, and focus restoration.
 - **Styling:** partial theme and widget rules for hover, press, focus, selection,
   disabled, and error states, with shared spacing and typography defaults.
 - **Drawing:** use an owned `PixelBuffer` or borrow existing RGBA/BGRA pixels

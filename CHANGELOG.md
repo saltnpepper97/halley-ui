@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add renderer-neutral `UiStack`, popovers, menus, and modal dialogs with anchored
+  flip/clamp placement, constrained scrolling, scoped input, and focus restoration.
+- Add keyboard/hover menu selection, dismissal policies, modal backdrops, and
+  layer-aware events with stale clipboard and frame protection.
+- Add menu/menu-item/dialog accessibility roles and modal state; extend `Theme`,
+  `ComponentStyles`, and `SemanticNode` for overlay styling and semantics.
+- Add overlay integration documentation and interaction/rendering regressions.
+
 - Add partial component and widget styles for normal, selected, hover, press,
   focus, error, and disabled states, including list-wide option styles.
 - Add shared spacing defaults, typography roles, and configurable editor colors.
