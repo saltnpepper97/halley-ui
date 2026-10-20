@@ -10,6 +10,11 @@ keywords = ["ui", "layout", "taffy", "wayland", "accessibility"]
 categories = ["gui", "graphics"]
 include = ["src/**", "examples/**", "tests/**", "docs/components/**", "docs/README.md", "docs/input.md", "docs/rendering.md", "docs/accessibility.md", "docs/styling.md", "/README.md", "/LICENSE", "/CHANGELOG.md", "/Cargo.toml", "/Cargo.lock"]
 
+[workspace]
+members = ["demo"]
+default-members = ["."]
+resolver = "3"
+
 [features]
 default = []
 accessibility = ["dep:accesskit"]

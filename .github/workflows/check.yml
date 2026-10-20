@@ -15,3 +15,21 @@ jobs:
       - run: cargo test --locked --no-default-features
       - run: cargo clippy --locked --all-features --all-targets -- -D warnings
       - run: cargo package --locked
+  demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev fonts-dejavu-core
+      - run: cargo test --locked -p halley-ui-demo
+      - run: cargo clippy --locked -p halley-ui-demo --all-targets -- -D warnings
+      - run: cargo run --locked -p halley-ui-demo -- --check --output target/demo-checks
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: demo-screenshots
+          path: target/demo-checks/*.png
+          retention-days: 7
+          if-no-files-found: ignore

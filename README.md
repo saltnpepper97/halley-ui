@@ -80,6 +80,10 @@ real input-method journeys still need validation in each consuming application.
 Run `cargo test --all-features` and
 `cargo clippy --all-features --all-targets -- -D warnings`.
 
+For the maintained settings demo and light/dark component gallery, run
+`cargo run --locked -p halley-ui-demo`. See the [internal demo guide](https://github.com/saltnpepper97/halley-ui/blob/main/demo/README.md)
+for repeatable checks and screenshots.
+
 GPL-3.0-only. Shared text/rendering code was extracted from Halley under its
 existing license. Historical migration evidence and the deferred GPU prototype
 are retained in this repository, outside the published package.

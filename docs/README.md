@@ -28,6 +28,8 @@ The toolkit owns UI state and produces paint, hit, and semantic geometry. Your
 application owns its event loop, display connection, native window, renderer,
 clipboard, input method, business actions, and repaint scheduling.
 
-Maintainers can find historical checks in [verification](verification/README.md)
-and the deferred GPU migration in [reintegration](reintegration/README.md).
+Maintainers can use the [internal demo](https://github.com/saltnpepper97/halley-ui/blob/main/demo/README.md)
+for interactive light/dark review and repeatable settings checks. Historical checks
+are in [verification](verification/README.md), with the deferred GPU migration in
+[reintegration](reintegration/README.md).
 These repository-only archives are not shipped as supported backends.

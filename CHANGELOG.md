@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an unpublished internal demo with settings and component-state pages,
+  light/dark selection, and a shared interactive/headless settings scenario.
+- Run demo regressions in CI and retain per-theme screenshot review artifacts.
+
 - Add horizontal Slider controls with retained numeric values, optional steps,
   silent setters, pointer capture, keyboard adjustment, and overlay integration.
 - Add theme-driven slider metrics/styles and numeric accessibility semantics and
