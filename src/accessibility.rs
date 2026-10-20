@@ -80,6 +80,9 @@ impl AccessibilityTree {
             if semantic.disabled {
                 node.set_disabled();
             }
+            if semantic.invalid {
+                node.set_invalid(accesskit::Invalid::True);
+            }
             if semantic.read_only {
                 node.set_read_only();
             }

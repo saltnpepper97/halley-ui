@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add partial component and widget styles for normal, selected, hover, press,
+  focus, error, and disabled states, including list-wide option styles.
+- Add shared spacing defaults, typography roles, and configurable editor colors.
+- Resolve fonts and padding consistently for layout, custom child text, caret,
+  pointer hits, and IME geometry; theme changes preserve retained UI state.
+- Expose control validation state through AccessKit.
+- Extend `Theme` and `SemanticNode`; replace `PreparedView::button_visuals` with
+  state-aware preparation. See the styling guide for API migration.
 - Add retained selectable lists with stable item keys, disabled options,
   arrow/page navigation, automatic reveal, and selection separate from focus.
 - Add programmatic focus, selection, and selected-item activation APIs.

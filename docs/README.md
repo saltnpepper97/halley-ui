@@ -16,6 +16,7 @@ translate your host's input events into the toolkit's event types.
 
 ## Host integration
 
+- [Themes and component styles](styling.md)
 - [Input and focus](input.md)
 - [Rendering and buffers](rendering.md)
 - [Accessibility](accessibility.md)

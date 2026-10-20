@@ -55,41 +55,11 @@ pub struct CardStyle {
     pub border_width: f32,
     pub radius: f32,
 }
-#[derive(Clone, Debug, PartialEq)]
-pub struct Theme {
-    pub font: Font,
-    pub text: Color,
-    pub subtext: Color,
-    pub card: CardStyle,
-    pub button: CardStyle,
-    pub button_hover: Color,
-    pub button_pressed: Color,
-}
-impl Default for Theme {
-    fn default() -> Self {
-        let fill = Color::rgb8(38, 46, 56);
-        let border = Color::rgb8(214, 93, 38);
-        Self {
-            font: Font::default(),
-            text: Color::rgb8(240, 245, 250),
-            subtext: Color::rgb8(190, 195, 200),
-            card: CardStyle {
-                fill,
-                border,
-                border_width: 3.0,
-                radius: 8.0,
-            },
-            button: CardStyle {
-                fill: Color::rgb8(58, 66, 76),
-                border,
-                border_width: 0.0,
-                radius: 8.0,
-            },
-            button_hover: Color::rgb8(78, 86, 96),
-            button_pressed: Color::rgb8(98, 106, 116),
-        }
-    }
-}
+#[path = "style.rs"]
+pub mod style;
+pub use style::Theme;
+use style::{ResolvedStyle, StyleSheet, TextRole};
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Align {
     Start,
@@ -100,8 +70,8 @@ pub enum Align {
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct LayoutStyle {
-    padding: Insets,
-    gap: f32,
+    padding: Option<Insets>,
+    gap: Option<f32>,
     width: Option<f32>,
     height: Option<f32>,
     max_width: Option<f32>,
@@ -122,6 +92,7 @@ enum Kind {
         font: Option<Font>,
         overflow: TextOverflow,
         align: Align,
+        role: TextRole,
     },
     Button {
         text: String,
@@ -156,6 +127,9 @@ pub struct Widget {
     layout: LayoutStyle,
     children: Vec<Widget>,
     accessible_label: Option<String>,
+    style: Option<Arc<StyleSheet>>,
+    item_style: Option<Arc<StyleSheet>>,
+    invalid: bool,
 }
 impl Widget {
     fn new(key: impl Into<String>, kind: Kind) -> Self {
@@ -165,6 +139,9 @@ impl Widget {
             layout: LayoutStyle::default(),
             children: Vec::new(),
             accessible_label: None,
+            style: None,
+            item_style: None,
+            invalid: false,
         }
     }
 }
@@ -176,11 +153,11 @@ macro_rules! layout_methods {
             self
         }
         pub fn padding(mut self, value: f32) -> Self {
-            self.0.layout.padding = Insets::all(value.max(0.0));
+            self.0.layout.padding = Some(Insets::all(value.max(0.0)));
             self
         }
         pub fn padding_xy(mut self, x: f32, y: f32) -> Self {
-            self.0.layout.padding = Insets::xy(x.max(0.0), y.max(0.0));
+            self.0.layout.padding = Some(Insets::xy(x.max(0.0), y.max(0.0)));
             self
         }
         pub fn width(mut self, value: f32) -> Self {
@@ -205,6 +182,20 @@ macro_rules! layout_methods {
         }
     };
 }
+macro_rules! control_style_methods {
+    () => {
+        /// Partial component overrides; unset values continue to inherit the theme.
+        pub fn style(mut self, style: StyleSheet) -> Self {
+            self.0.style = Some(Arc::new(style));
+            self
+        }
+        /// Validation/error appearance and accessibility state; this does not disable input.
+        pub fn invalid(mut self, invalid: bool) -> Self {
+            self.0.invalid = invalid;
+            self
+        }
+    };
+}
 macro_rules! container {
     ($name:ident, $kind:expr) => {
         #[derive(Clone, Debug)]
@@ -218,7 +209,7 @@ macro_rules! container {
                 self
             }
             pub fn gap(mut self, value: f32) -> Self {
-                self.0.layout.gap = value.max(0.0);
+                self.0.layout.gap = Some(value.max(0.0));
                 self
             }
             pub fn align(mut self, value: Align) -> Self {
@@ -257,6 +248,7 @@ impl Label {
                 font: None,
                 overflow: TextOverflow::Clip,
                 align: Align::Start,
+                role: TextRole::Body,
             },
         ))
     }
@@ -269,6 +261,13 @@ impl Label {
     pub fn font(mut self, value: Font) -> Self {
         if let Kind::Label { font, .. } = &mut self.0.kind {
             *font = Some(value);
+        }
+        self
+    }
+    /// Choose a theme font role; an explicit `font` takes precedence.
+    pub fn typography(mut self, role: TextRole) -> Self {
+        if let Kind::Label { role: value, .. } = &mut self.0.kind {
+            *value = role;
         }
         self
     }
@@ -297,7 +296,7 @@ pub struct Button(Widget);
 impl Button {
     pub fn new(key: impl Into<String>, text: impl Into<String>) -> Self {
         let key = key.into();
-        let mut widget = Widget::new(
+        let widget = Widget::new(
             key.clone(),
             Kind::Button {
                 text: text.into(),
@@ -305,7 +304,6 @@ impl Button {
                 disabled: false,
             },
         );
-        widget.layout.padding = Insets::xy(12.0, 8.0);
         Self(widget)
     }
     /// Use custom content while keeping the button's focus and activation behavior.
@@ -325,6 +323,7 @@ impl Button {
         }
         self
     }
+    control_style_methods!();
     layout_methods!();
 }
 impl From<Button> for Widget {
@@ -347,7 +346,6 @@ impl TextInput {
                 read_only: false,
             },
         );
-        widget.layout.padding = Insets::xy(10.0, 8.0);
         widget.layout.width = Some(240.0);
         Self(widget)
     }
@@ -369,6 +367,7 @@ impl TextInput {
         }
         self
     }
+    control_style_methods!();
     layout_methods!();
 }
 impl From<TextInput> for Widget {
@@ -482,6 +481,7 @@ pub struct SemanticNode {
     pub selection: Option<(usize, usize)>,
     pub selected: Option<bool>,
     pub active_descendant: Option<String>,
+    pub invalid: bool,
 }
 #[derive(Clone, Debug, Default)]
 pub struct PreparedView {
@@ -544,24 +544,6 @@ impl PreparedView {
         }
         view
     }
-    pub fn button_visuals(&mut self, theme: &Theme, hovered: Option<&str>, pressed: Option<&str>) {
-        for hit in &self.hits {
-            for item in &mut self.items {
-                if let PaintItem::Card { key, style, .. } = item
-                    && key == &hit.key
-                {
-                    *style = theme.button;
-                    if hit.disabled {
-                        style.fill.a *= 0.5;
-                    } else if pressed == Some(key.as_str()) {
-                        style.fill = theme.button_pressed;
-                    } else if hovered == Some(key.as_str()) {
-                        style.fill = theme.button_hover;
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -570,6 +552,8 @@ pub enum LayoutError {
     DuplicateKey(String),
     #[error("layout bounds and style values must be finite and nonnegative")]
     InvalidGeometry,
+    #[error("style colors must be finite and style dimensions finite and nonnegative: {0}")]
+    InvalidStyle(String),
     #[error("list items must belong directly to a List and contain only presentation widgets: {0}")]
     InvalidListItem(String),
     #[error("Taffy layout: {0}")]
@@ -690,11 +674,21 @@ impl UiView {
         {
             return Err(LayoutError::InvalidGeometry);
         }
-        let mut tree = TaffyTree::<Kind>::new();
+        theme.validate()?;
+        let styles = style::resolve_tree(&self.root, theme, &self.state)?;
+        let mut tree = TaffyTree::<Measurement>::new();
         tree.disable_rounding();
         let mut nodes = HashMap::new();
         let mut keys = HashSet::new();
-        let root = build_tree(&mut tree, &self.root, &mut nodes, &mut keys, &self.state)?;
+        let root = build_tree(
+            &mut tree,
+            &self.root,
+            &mut nodes,
+            &mut keys,
+            &self.state,
+            &styles,
+            theme,
+        )?;
         let available = tf::Size {
             width: tf::AvailableSpace::Definite((bounds.size.width - self.margin * 2.0).max(0.0)),
             height: tf::AvailableSpace::Definite((bounds.size.height - self.margin * 2.0).max(0.0)),
@@ -718,29 +712,17 @@ impl UiView {
                 |_, _| 0.0,
                 |known, available| {
                     let intrinsic = match context.as_deref() {
-                        Some(Kind::Label {
-                            text: value,
+                        Some(Measurement::Text {
+                            value,
                             font,
                             color,
-                            ..
-                        }) => measure(
-                            font.as_ref().unwrap_or(&theme.font),
-                            value,
-                            color.unwrap_or(theme.text),
-                        ),
-                        Some(
-                            Kind::Button { text: value, .. } | Kind::ListItem { text: value, .. },
-                        ) => measure(&theme.font, value, theme.text),
-                        Some(Kind::TextInput { initial, .. }) => {
-                            let size = measure(
-                                &theme.font,
-                                if initial.is_empty() { "M" } else { initial },
-                                theme.text,
-                            );
-                            Size::new(size.width.max(120.0), size.height)
+                            min_width,
+                        }) => {
+                            let size = measure(font, value, *color);
+                            Size::new(size.width.max(*min_width), size.height)
                         }
-                        Some(Kind::Image { data }) => data.size(),
-                        _ => Size::default(),
+                        Some(Measurement::Fixed(size)) => *size,
+                        None => Size::default(),
                     };
                     let width = match available.width {
                         tf::AvailableSpace::Definite(limit) => intrinsic.width.min(limit.max(0.0)),
@@ -781,13 +763,13 @@ impl UiView {
                 origin,
                 bounds,
                 &self.key,
-                theme,
                 &mut measure,
                 &mut prepared,
                 &mut self.state,
                 &mut self.editing_text,
                 &[],
                 None,
+                &styles,
             )?;
             if !self.state.pending_reveal.is_empty() {
                 let scene = interaction::InputScene::from(&prepared);
@@ -799,19 +781,6 @@ impl UiView {
                     continue;
                 }
             }
-            prepared.button_visuals(
-                theme,
-                self.state
-                    .hover
-                    .as_ref()
-                    .map(|key| format!("{}/{}", self.key, key))
-                    .as_deref(),
-                self.state
-                    .pressed
-                    .as_ref()
-                    .map(|key| format!("{}/{}", self.key, key))
-                    .as_deref(),
-            );
             self.input_scene = Some(interaction::InputScene::from(&prepared));
             self.cached = Some(Cached {
                 bounds,
@@ -822,23 +791,44 @@ impl UiView {
         }
     }
 }
+enum Measurement {
+    Text {
+        value: String,
+        font: Font,
+        color: Color,
+        min_width: f32,
+    },
+    Fixed(Size),
+}
+#[allow(clippy::too_many_arguments)]
 fn build_tree(
-    tree: &mut TaffyTree<Kind>,
+    tree: &mut TaffyTree<Measurement>,
     widget: &Widget,
     nodes: &mut HashMap<String, tf::NodeId>,
     keys: &mut HashSet<String>,
     state: &crate::input::State,
+    styles: &HashMap<String, ResolvedStyle>,
+    theme: &Theme,
 ) -> Result<tf::NodeId, LayoutError> {
     if !keys.insert(widget.key.clone()) {
         return Err(LayoutError::DuplicateKey(widget.key.clone()));
     }
     let l = widget.layout;
+    let visual = &styles[&widget.key];
+    let padding = visual.padding;
+    let gap = l
+        .gap
+        .unwrap_or(if matches!(widget.kind, Kind::List { .. }) {
+            theme.spacing.list_gap
+        } else {
+            theme.spacing.container_gap
+        });
     if ![
-        l.padding.left,
-        l.padding.right,
-        l.padding.top,
-        l.padding.bottom,
-        l.gap,
+        padding.left,
+        padding.right,
+        padding.top,
+        padding.bottom,
+        gap,
         l.grow,
     ]
     .iter()
@@ -865,14 +855,14 @@ fn build_tree(
             Align::Stretch => tf::AlignItems::STRETCH,
         }),
         padding: tf::Rect {
-            left: tf::length(l.padding.left),
-            right: tf::length(l.padding.right),
-            top: tf::length(l.padding.top),
-            bottom: tf::length(l.padding.bottom),
+            left: tf::length(padding.left),
+            right: tf::length(padding.right),
+            top: tf::length(padding.top),
+            bottom: tf::length(padding.bottom),
         },
         gap: tf::Size {
-            width: tf::length(l.gap),
-            height: tf::length(l.gap),
+            width: tf::length(gap),
+            height: tf::length(gap),
         },
         size: tf::Size {
             width: dimension(l.width),
@@ -904,7 +894,7 @@ fn build_tree(
     let children = widget
         .children
         .iter()
-        .map(|child| build_tree(tree, child, nodes, keys, state))
+        .map(|child| build_tree(tree, child, nodes, keys, state, styles, theme))
         .collect::<Result<Vec<_>, _>>()?;
     if matches!(widget.kind, Kind::Scroll | Kind::List { .. }) {
         for child in &children {
@@ -917,21 +907,28 @@ fn build_tree(
         tree.new_leaf_with_context(
             style,
             match &widget.kind {
-                Kind::TextInput {
-                    placeholder,
-                    disabled,
-                    read_only,
-                    ..
-                } => Kind::TextInput {
-                    initial: state
+                Kind::Label { text, .. }
+                | Kind::Button { text, .. }
+                | Kind::ListItem { text, .. } => Measurement::Text {
+                    value: text.clone(),
+                    font: visual.font.clone(),
+                    color: visual.text,
+                    min_width: 0.0,
+                },
+                Kind::TextInput { .. } => {
+                    let value = state
                         .editors
                         .get(&widget.key)
-                        .map_or_else(String::new, |editor| editor.display().0),
-                    placeholder: placeholder.clone(),
-                    disabled: *disabled,
-                    read_only: *read_only,
-                },
-                _ => widget.kind.clone(),
+                        .map_or_else(String::new, |editor| editor.display().0);
+                    Measurement::Text {
+                        value: if value.is_empty() { "M".into() } else { value },
+                        font: visual.font.clone(),
+                        color: visual.text,
+                        min_width: 120.0,
+                    }
+                }
+                Kind::Image { data } => Measurement::Fixed(data.size()),
+                _ => Measurement::Fixed(Size::default()),
             },
         )?
     } else {
@@ -942,20 +939,22 @@ fn build_tree(
 }
 #[allow(clippy::too_many_arguments)]
 fn paint_tree(
-    tree: &TaffyTree<Kind>,
+    tree: &TaffyTree<Measurement>,
     nodes: &HashMap<String, tf::NodeId>,
     widget: &Widget,
     parent: Point,
     parent_clip: Rect,
     namespace: &str,
-    theme: &Theme,
     measure: &mut impl FnMut(&Font, &str, Color) -> Size,
     out: &mut PreparedView,
     state: &mut crate::input::State,
     editing_text: &mut Option<TextSystem>,
     scroll_ancestors: &[String],
     list: Option<&Widget>,
+    styles: &HashMap<String, ResolvedStyle>,
 ) -> Result<(), LayoutError> {
+    let visual = &styles[&widget.key];
+    let padding = visual.padding;
     let layout = tree.layout(nodes[&widget.key])?;
     let rect = Rect::new(
         parent.x + layout.location.x,
@@ -968,10 +967,10 @@ fn paint_tree(
     out.rects.insert(widget.key.clone(), rect);
     let key = format!("{namespace}/{}", widget.key);
     let content = Rect::new(
-        rect.origin.x + widget.layout.padding.left,
-        rect.origin.y + widget.layout.padding.top,
-        (rect.size.width - widget.layout.padding.left - widget.layout.padding.right).max(0.0),
-        (rect.size.height - widget.layout.padding.top - widget.layout.padding.bottom).max(0.0),
+        rect.origin.x + padding.left,
+        rect.origin.y + padding.top,
+        (rect.size.width - padding.left - padding.right).max(0.0),
+        (rect.size.height - padding.top - padding.bottom).max(0.0),
     );
     let (role, value, disabled, read_only, selection) = match &widget.kind {
         Kind::Label { text, .. } => (SemanticRole::Label, Some(text.clone()), false, false, None),
@@ -1012,9 +1011,10 @@ fn paint_tree(
         key: widget.key.clone(),
         role,
         value,
-        disabled,
+        disabled: visual.state.disabled,
         read_only,
         selection,
+        invalid: widget.invalid,
         selected: if matches!(widget.kind, Kind::ListItem { .. }) {
             Some(list.is_some_and(|l| {
                 state.lists.get(&l.key).and_then(|s| s.as_deref()) == Some(widget.key.as_str())
@@ -1033,23 +1033,22 @@ fn paint_tree(
         clip,
     });
     match &widget.kind {
-        Kind::Card { style } => out.items.push(PaintItem::Card {
+        Kind::Card { .. } => out.items.push(PaintItem::Card {
             key,
             rect,
             clip,
-            style: style.unwrap_or(theme.card),
+            style: visual.surface,
         }),
         Kind::Label {
             text,
-            color,
-            font,
             overflow,
             align,
+            ..
         } => {
-            let font = font.as_ref().unwrap_or(&theme.font);
+            let font = &visual.font;
             let (text, size) =
                 crate::text::fit_with_measure(text, content.size.width, *overflow, |value| {
-                    measure(font, value, color.unwrap_or(theme.text))
+                    measure(font, value, visual.text)
                 });
             let x = match align {
                 Align::Center => (content.size.width - size.width) / 2.0,
@@ -1067,17 +1066,23 @@ fn paint_tree(
                 clip: content.intersection(clip),
                 text,
                 font: font.clone(),
-                color: color.unwrap_or(theme.text),
+                color: visual.text,
             });
         }
-        Kind::List { disabled, .. } => {
+        Kind::List { .. } => {
+            out.items.push(PaintItem::Card {
+                key: key.clone(),
+                rect,
+                clip,
+                style: visual.surface,
+            });
             out.controls.push(ControlRegion {
                 key: widget.key.clone(),
                 rect,
                 clip,
                 content,
                 kind: ControlKind::List,
-                disabled: *disabled,
+                disabled: visual.state.disabled,
                 scroll_ancestors: scroll_ancestors.to_vec(),
                 line: None,
                 text_origin: content.origin,
@@ -1086,39 +1091,17 @@ fn paint_tree(
         }
         Kind::Button { text, action, .. } | Kind::ListItem { text, action, .. } => {
             let is_item = matches!(widget.kind, Kind::ListItem { .. });
-            let selected = list.is_some_and(|l| {
-                state.lists.get(&l.key).and_then(|s| s.as_deref()) == Some(widget.key.as_str())
-            });
-            let mut style = theme.button;
-            if is_item {
-                style.fill = if selected {
-                    list.and_then(|l| match l.kind {
-                        Kind::List {
-                            selection_color, ..
-                        } => selection_color,
-                        _ => None,
-                    })
-                    .unwrap_or(theme.button_pressed)
-                } else if state.hover.as_deref() == Some(widget.key.as_str()) && !disabled {
-                    theme.button_hover
-                } else {
-                    Color::rgba(0.0, 0.0, 0.0, 0.0)
-                };
-                if disabled {
-                    style.fill.a *= 0.5;
-                }
-            }
             out.items.push(PaintItem::Card {
                 key: key.clone(),
                 rect,
                 clip,
-                style,
+                style: visual.surface,
             });
             let (text, size) = crate::text::fit_with_measure(
                 text,
                 content.size.width,
                 TextOverflow::EllipsisEnd,
-                |value| measure(&theme.font, value, theme.text),
+                |value| measure(&visual.font, value, visual.text),
             );
             if !is_item || widget.children.is_empty() {
                 out.items.push(PaintItem::Text {
@@ -1136,12 +1119,8 @@ fn paint_tree(
                     ),
                     clip: content.intersection(clip),
                     text,
-                    font: theme.font.clone(),
-                    color: if is_item && disabled {
-                        theme.subtext
-                    } else {
-                        theme.text
-                    },
+                    font: visual.font.clone(),
+                    color: visual.text,
                 });
             }
             out.controls.push(ControlRegion {
@@ -1191,7 +1170,6 @@ fn paint_tree(
         }
         Kind::TextInput {
             placeholder,
-            disabled,
             read_only,
             ..
         } => {
@@ -1207,9 +1185,14 @@ fn paint_tree(
                 display.as_str()
             };
             let service = editing_text.get_or_insert_with(TextSystem::new);
-            let line = service.line_geometry(&theme.font, &display);
+            let line = service.line_geometry(&visual.font, &display);
             let caret_x = line.x(cursor);
-            let size = measure(&theme.font, value, theme.text);
+            let text_color = if showing_placeholder {
+                visual.placeholder
+            } else {
+                visual.text
+            };
+            let size = measure(&visual.font, value, text_color);
             let focused =
                 state.window_focused && state.focus.as_deref() == Some(widget.key.as_str());
             if focused {
@@ -1226,16 +1209,11 @@ fn paint_tree(
                 content.origin.x - editor.offset,
                 content.origin.y + (content.size.height - line.height).max(0.0) / 2.0,
             );
-            let mut style = theme.button;
-            style.border_width = if focused { 2.0 } else { 1.0 };
-            if *disabled {
-                style.fill.a *= 0.5;
-            }
             out.items.push(PaintItem::Card {
                 key: key.clone(),
                 rect,
                 clip,
-                style,
+                style: visual.surface,
             });
             if focused && editor.preedit.is_none() {
                 let selection = editor.selection();
@@ -1252,8 +1230,8 @@ fn paint_tree(
                         rect: Rect::new(origin.x + x, origin.y, *w, line.height),
                         clip: content.intersection(clip),
                         style: CardStyle {
-                            fill: Color::rgba(0.3, 0.5, 0.8, 0.5),
-                            border: theme.text,
+                            fill: visual.selection,
+                            border: visual.selection,
                             border_width: 0.0,
                             radius: 0.0,
                         },
@@ -1265,12 +1243,8 @@ fn paint_tree(
                 rect: Rect::new(origin.x, origin.y, size.width, size.height),
                 clip: content.intersection(clip),
                 text: value.into(),
-                font: theme.font.clone(),
-                color: if showing_placeholder {
-                    theme.subtext
-                } else {
-                    theme.text
-                },
+                font: visual.font.clone(),
+                color: text_color,
             });
             let caret = Rect::new(origin.x + caret_x, origin.y, 1.0, line.height);
             if focused {
@@ -1279,8 +1253,8 @@ fn paint_tree(
                     rect: caret,
                     clip: content.intersection(clip),
                     style: CardStyle {
-                        fill: theme.text,
-                        border: theme.text,
+                        fill: visual.caret,
+                        border: visual.caret,
                         border_width: 0.0,
                         radius: 0.0,
                     },
@@ -1299,8 +1273,8 @@ fn paint_tree(
                         ),
                         clip: content.intersection(clip),
                         style: CardStyle {
-                            fill: theme.text,
-                            border: theme.text,
+                            fill: visual.preedit,
+                            border: visual.preedit,
                             border_width: 0.0,
                             radius: 0.0,
                         },
@@ -1315,7 +1289,7 @@ fn paint_tree(
                 kind: ControlKind::TextInput {
                     read_only: *read_only,
                 },
-                disabled: *disabled,
+                disabled: visual.state.disabled,
                 scroll_ancestors: scroll_ancestors.to_vec(),
                 line: Some(line),
                 text_origin: origin,
@@ -1324,19 +1298,16 @@ fn paint_tree(
         }
         Kind::Row | Kind::Column | Kind::Scroll => {}
     }
-    if state.window_focused
-        && state.focus.as_deref() == Some(widget.key.as_str())
-        && matches!(widget.kind, Kind::Button { .. } | Kind::List { .. })
-    {
+    if visual.outline.width > 0.0 {
         out.items.push(PaintItem::Card {
             key: format!("{namespace}/{}/focus", widget.key),
             rect,
             clip,
             style: CardStyle {
                 fill: Color::rgba(0.0, 0.0, 0.0, 0.0),
-                border: theme.card.border,
-                border_width: 2.0,
-                radius: theme.button.radius,
+                border: visual.outline.color,
+                border_width: visual.outline.width,
+                radius: visual.surface.radius,
             },
         });
     }
@@ -1346,12 +1317,12 @@ fn paint_tree(
         let mut extent = content.size;
         for child in &widget.children {
             let child_layout = tree.layout(nodes[&child.key])?;
-            extent.width = extent.width.max(
-                child_layout.location.x + child_layout.size.width - widget.layout.padding.left,
-            );
-            extent.height = extent.height.max(
-                child_layout.location.y + child_layout.size.height - widget.layout.padding.top,
-            );
+            extent.width = extent
+                .width
+                .max(child_layout.location.x + child_layout.size.width - padding.left);
+            extent.height = extent
+                .height
+                .max(child_layout.location.y + child_layout.size.height - padding.top);
         }
         let offset = state.scroll.entry(widget.key.clone()).or_default();
         offset.x = offset
@@ -1380,7 +1351,6 @@ fn paint_tree(
             child_origin,
             content.intersection(clip),
             namespace,
-            theme,
             measure,
             out,
             state,
@@ -1391,6 +1361,7 @@ fn paint_tree(
             } else {
                 list
             },
+            styles,
         )?;
     }
     Ok(())

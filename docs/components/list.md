@@ -78,3 +78,8 @@ pressed-button fill. Selection remains visible while another widget has focus.
 AccessKit exposes listbox/option roles, selected state, the active descendant,
 scroll ranges, and focus/activation actions. Native screen-reader announcements
 still require verification in each consuming application.
+
+Use `List::style` for the viewport and `List::item_style` for shared option
+styles. `ListItem::style` supplies individual overrides. State properties merge,
+so selected, hovered, and focused appearance can coexist. Explicit selected fill
+rules override the `selection_color` fallback. See [themes and styling](../styling.md).

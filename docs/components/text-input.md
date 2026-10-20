@@ -38,3 +38,9 @@ selection, and copy while rejecting edits; `disabled(true)` also removes focus
 and input. `TextChanged` and `Submit` carry the current committed value.
 
 See [input integration](../input.md) for clipboard replies and event routing.
+
+`style(StyleSheet)` controls component metrics and state appearance, including
+placeholder, selection, caret, and preedit colors. `invalid(true)` applies error
+styling and accessibility state while keeping the editor usable. Theme font
+changes update text layout, pointer hits, and IME geometry on the next
+preparation. See [themes and styling](../styling.md).

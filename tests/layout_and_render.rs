@@ -249,13 +249,22 @@ fn repeated_button_updates_restore_normal_fill_and_do_not_accumulate_alpha() {
             .child(Button::new("enabled", "Yes"))
             .child(Button::new("disabled", "No").disabled(true)),
     );
-    let mut scene = view
-        .prepare_with_measure(Rect::new(0.0, 0.0, 200.0, 80.0), &theme, metrics)
+    let bounds = Rect::new(0.0, 0.0, 200.0, 80.0);
+    let scene = view
+        .prepare_with_measure(bounds, &theme, metrics)
         .unwrap()
         .clone();
-    scene.button_visuals(&theme, Some("buttons/enabled"), None);
-    scene.button_visuals(&theme, None, None);
-    scene.button_visuals(&theme, None, None);
+    let rect = scene.rects["enabled"];
+    view.handle_event(halley_ui::InputEvent::PointerMove {
+        position: Point::new(rect.origin.x + 1.0, rect.origin.y + 1.0),
+    });
+    view.prepare_with_measure(bounds, &theme, metrics).unwrap();
+    view.handle_event(halley_ui::InputEvent::PointerMove {
+        position: Point::new(-1.0, -1.0),
+    });
+    view.prepare_with_measure(bounds, &theme, metrics).unwrap();
+    view.invalidate();
+    let scene = view.prepare_with_measure(bounds, &theme, metrics).unwrap();
     for item in &scene.items {
         if let PaintItem::Card { key, style, .. } = item {
             if key == "buttons/enabled" {
