@@ -108,6 +108,12 @@ impl From<ListItem> for Widget {
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum InteractionError {
+    #[error("control is not a checkbox or switch: {0}")]
+    NotCheckable(String),
+    #[error("control is not a radio group: {0}")]
+    NotRadioGroup(String),
+    #[error("option {option} does not belong to radio group {group}")]
+    InvalidRadioOption { group: String, option: String },
     #[error("prepare the current content before requesting focus or selection")]
     NotPrepared,
     #[error("unknown control: {0}")]
@@ -132,7 +138,14 @@ pub(super) fn validate(
         || (inside_item
             && matches!(
                 widget.kind,
-                Kind::Button { .. } | Kind::TextInput { .. } | Kind::List { .. } | Kind::Scroll
+                Kind::Button { .. }
+                    | Kind::TextInput { .. }
+                    | Kind::List { .. }
+                    | Kind::Scroll
+                    | Kind::Checkbox { .. }
+                    | Kind::Switch { .. }
+                    | Kind::RadioGroup { .. }
+                    | Kind::RadioOption { .. }
             ))
     {
         return Err(LayoutError::InvalidListItem(widget.key.clone()));
@@ -213,7 +226,11 @@ impl UiView {
             return Err(InteractionError::Disabled(key.into()));
         }
         let mut out = Vec::new();
-        let target = if let ControlKind::ListItem { list, .. } = &control.kind {
+        let target = if matches!(control.kind, ControlKind::RadioGroup) {
+            forms::radio_entry(key, &scene.controls, &self.state)
+                .map(|c| c.key.clone())
+                .ok_or_else(|| InteractionError::Disabled(key.into()))?
+        } else if let ControlKind::ListItem { list, .. } = &control.kind {
             self.select_in(list, Some(key), &scene, &mut out)?;
             list.clone()
         } else {

@@ -13,6 +13,10 @@ ranges, bounds, and keyboard focus. Text inputs contain `TextRun` children so
 native text interfaces can inspect and edit their contents. Meaningful images
 need labels; unlabelled images are decorative.
 
+[Form controls](components/forms.md) expose checkbox, switch, radio-group, and
+radio-button roles with checked and disabled state. Accessible activation uses
+the same value-change events as pointer and keyboard input.
+
 For [overlays](components/overlays.md), publish the combined `UiStack` frame and
 route actions through the stack. Its active scope exposes menu/menu-item or
 modal-dialog semantics; background views are excluded until their scope resumes.

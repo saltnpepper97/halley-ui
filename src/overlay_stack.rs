@@ -105,6 +105,30 @@ impl UiStack {
             || self.base.needs_prepare()
             || self.layers.iter().any(|l| l.view.needs_prepare())
     }
+    /// Configure motion for all current and future layers. Zero disables motion.
+    pub fn set_switch_animation_duration(&mut self, duration: std::time::Duration) {
+        self.base.set_switch_animation_duration(duration);
+        for layer in &mut self.layers {
+            layer.view.set_switch_animation_duration(duration);
+        }
+        if self.needs_prepare() {
+            self.invalidate(false);
+        }
+    }
+    pub fn has_animations(&self) -> bool {
+        self.base.has_animations() || self.layers.iter().any(|layer| layer.view.has_animations())
+    }
+    /// Host-driven visual updates leave retained values and input geometry unchanged.
+    pub fn advance_animations(&mut self, delta: std::time::Duration) -> bool {
+        let mut changed = self.base.advance_animations(delta);
+        for layer in &mut self.layers {
+            changed |= layer.view.advance_animations(delta);
+        }
+        if changed {
+            self.invalidate(false);
+        }
+        changed
+    }
     /// Focus and anchor-loss events produced while preparing; drain after preparation.
     pub fn take_events(&mut self) -> Vec<LayerEvent> {
         std::mem::take(&mut self.events)
@@ -179,6 +203,7 @@ impl UiStack {
         let mut view =
             UiView::new(format!("{}/overlay/{key}", self.base.key)).anchor(Anchor::TopLeft);
         window_focus(&mut view, self.window_focused);
+        view.set_switch_animation_duration(self.base.state.switch_duration);
         self.layers.push(OpenLayer {
             definition,
             view,
@@ -270,6 +295,38 @@ impl UiStack {
             .view_mut(layer)
             .ok_or_else(|| OverlayError::InactiveLayer(layer.clone()))?;
         let changed = view.set_text_value(key, value);
+        if changed {
+            self.invalidate(false);
+        }
+        Ok(changed)
+    }
+    /// Programmatic boolean update without a user event, including inactive layers.
+    pub fn set_checked(
+        &mut self,
+        layer: &LayerId,
+        key: &str,
+        value: bool,
+    ) -> Result<bool, OverlayError> {
+        let view = self
+            .view_mut(layer)
+            .ok_or_else(|| OverlayError::InactiveLayer(layer.clone()))?;
+        let changed = view.set_checked(key, value)?;
+        if changed {
+            self.invalidate(false);
+        }
+        Ok(changed)
+    }
+    /// Programmatic radio update without a user event, including inactive layers.
+    pub fn set_radio_selected(
+        &mut self,
+        layer: &LayerId,
+        group: &str,
+        option: Option<&str>,
+    ) -> Result<bool, OverlayError> {
+        let view = self
+            .view_mut(layer)
+            .ok_or_else(|| OverlayError::InactiveLayer(layer.clone()))?;
+        let changed = view.set_radio_selected(group, option)?;
         if changed {
             self.invalidate(false);
         }
@@ -805,6 +862,7 @@ fn window_focus(view: &mut UiView, focused: bool) {
         view.state.window_focused = focused;
         if !focused {
             view.state.pressed = None;
+            view.state.choice_space = None;
             view.state.dragging = false;
             view.state.pending_paste = None;
             for editor in view.state.editors.values_mut() {
@@ -815,6 +873,7 @@ fn window_focus(view: &mut UiView, focused: bool) {
     }
 }
 fn cancel_capture(view: &mut UiView) {
+    view.state.choice_space = None;
     if view.state.pressed.take().is_some() || view.state.dragging {
         view.state.dragging = false;
         view.invalidate();
@@ -861,6 +920,9 @@ fn append_input(out: &mut PreparedView, source: &PreparedView, layer: &LayerId) 
                 .collect();
             if let ControlKind::ListItem { list, .. } = &mut control.kind {
                 *list = layer.qualify(list);
+            }
+            if let ControlKind::RadioOption { group } = &mut control.kind {
+                *group = layer.qualify(group);
             }
             control
         })

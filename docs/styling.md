@@ -128,7 +128,9 @@ Construct themes with `Theme { ... , ..Default::default() }` or mutate
 `button`, `button_hover`, `button_pressed`) still provide component defaults.
 Complete struct literals need the new `error`, `spacing`, `typography`, and
 `styles`, and `overlays` fields; complete `ComponentStyles` literals also need
-`menu` and `menu_item`. `SemanticNode` now includes `invalid` and `modal`.
+`menu` and `menu_item`. The [form controls](components/forms.md) also add `forms`
+metrics to `Theme`, four form component sheets to `ComponentStyles`, and
+`checked` to `SemanticNode`, alongside `invalid` and `modal`.
 
 `PreparedView::button_visuals` has been removed. Forward pointer/keyboard input
 through the retained `UiView`, then prepare and draw its result. This resolves

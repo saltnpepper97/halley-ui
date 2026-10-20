@@ -9,6 +9,7 @@ translate your host's input events into the toolkit's event types.
 - [Row and Column](components/layout.md): composition, spacing, and sizing.
 - [Label](components/label.md): fonts, colors, alignment, and truncation.
 - [Button](components/button.md): actions, disabled state, and keyboard activation.
+- [Checkbox, Switch, and RadioGroup](components/forms.md): retained values and form interaction.
 - [TextInput](components/text-input.md): values, selection, clipboard, and composition.
 - [Scroll](components/scroll.md): viewports, wheel movement, and focus reveal.
 - [List and ListItem](components/list.md): selection, keyboard navigation, and focus control.
