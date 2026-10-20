@@ -1,4 +1,5 @@
 //! The interactive host and scripted checks share this application and renderer.
+pub mod benchmark;
 pub mod scenario;
 pub mod theme;
 
@@ -57,6 +58,7 @@ pub struct Demo {
     pixels: PixelBuffer,
     status: String,
     run_requested: bool,
+    frame_valid: bool,
 }
 impl Demo {
     pub fn new(appearance: Appearance) -> Result<Self> {
@@ -75,6 +77,7 @@ impl Demo {
             pixels: PixelBuffer::new(800, 1040)?,
             status: "Ready · use Run checks to replay the settings test".into(),
             run_requested: false,
+            frame_valid: false,
         };
         demo.stack
             .set_switch_animation_duration(Duration::from_millis(160));
@@ -83,6 +86,13 @@ impl Demo {
     }
     pub fn viewport(&self) -> (u32, u32, f32) {
         (self.width, self.height, self.scale)
+    }
+    pub fn set_appearance(&mut self, appearance: Appearance) {
+        if self.appearance != appearance {
+            self.appearance = appearance;
+            self.theme = appearance.theme(self.scale);
+            self.rebuild();
+        }
     }
     pub fn resize(&mut self, width: u32, height: u32, scale: f32) -> Result<()> {
         if !scale.is_finite() || scale <= 0.0 {
@@ -200,7 +210,7 @@ impl Demo {
                     .child(
                         Label::new(
                             "focus-hint",
-                            "Tab to inspect focus; hover and press to inspect states.",
+                            "Tab moves focus; hover and press to inspect states.",
                         )
                         .typography(TextRole::Caption)
                         .color(self.theme.subtext),
@@ -342,6 +352,9 @@ impl Demo {
         }
     }
     pub fn render(&mut self) -> Result<&PixelBuffer> {
+        if !self.needs_redraw() {
+            return Ok(&self.pixels);
+        }
         let scene = self
             .stack
             .prepare(
@@ -405,7 +418,12 @@ impl Demo {
             .draw(footer_scene, &mut self.text, 1.0);
         self.pixels.surface().draw(&scene, &mut self.text, 1.0);
         self.scene = scene;
+        self.frame_valid = true;
         Ok(&self.pixels)
+    }
+    /// Pointer movement that leaves the same visual state needs no new frame.
+    pub fn needs_redraw(&self) -> bool {
+        !self.frame_valid || self.stack.needs_prepare()
     }
     pub fn input(&mut self, event: InputEvent) -> Result<Vec<LayerEvent>> {
         let events = self.stack.handle_event(event);
@@ -417,13 +435,11 @@ impl Demo {
             {
                 match action.0.as_str() {
                     "theme-light" | "theme-dark" => {
-                        self.appearance = if action.0 == "theme-light" {
+                        self.set_appearance(if action.0 == "theme-light" {
                             Appearance::Light
                         } else {
                             Appearance::Dark
-                        };
-                        self.theme = self.appearance.theme(self.scale);
-                        self.rebuild();
+                        });
                     }
                     "settings-tab" | "components-tab" => {
                         self.remember_settings();
@@ -473,13 +489,19 @@ impl Demo {
         Ok(events)
     }
     pub fn advance(&mut self, delta: Duration) {
-        self.stack.advance_animations(delta);
+        if self.stack.has_animations() {
+            self.stack.advance_animations(delta);
+        }
     }
     pub fn take_run_request(&mut self) -> bool {
         std::mem::take(&mut self.run_requested)
     }
     pub fn set_status(&mut self, status: impl Into<String>) {
-        self.status = status.into();
+        let status = status.into();
+        if status != self.status {
+            self.status = status;
+            self.frame_valid = false;
+        }
     }
     pub fn save(&mut self, path: &Path) -> Result<()> {
         self.render()?;

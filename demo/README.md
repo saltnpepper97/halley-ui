@@ -13,13 +13,16 @@ cargo run --locked -p halley-ui-demo -- --theme dark
 The Settings page combines sliders, text editing, checkboxes, an animated switch,
 radio options, scrolling, and a review dialog. Components shows normal, disabled,
 read-only, invalid, and range-endpoint examples. Hover, press, and Tab through the
-controls to inspect their interactive states. State lives in memory only.
+controls to inspect their interactive states. Focus outlines are temporarily
+hidden on non-input controls; text inputs retain their focused border. Keyboard
+focus and navigation still work. State lives in memory only.
 
 ## Concrete settings check
 
 Press **Run checks** to replay the settings scenario for the selected theme. It
-uses an isolated instance of the same application, then displays its resulting
-settings and pass count. This resets the demo's in-memory settings to the test
+uses an isolated instance of the same application on a worker thread, then displays
+its resulting settings and pass count. The window remains interactive while it
+runs. This resets the demo's in-memory settings to the test
 result. Failures appear in the status area. No files are written by the button.
 
 Run the same scenario for both themes without a display server:
@@ -63,3 +66,20 @@ Normal `cargo test`/`cargo package` at the repository root still target the
 library. The demo is `publish = false` and excluded from the library package.
 It writes no application log files or saved preferences. Native errors go to
 stderr when run from a terminal.
+
+## Performance checks
+
+The workspace dev profile optimizes the toolkit and demo packages while retaining
+debug information and overflow checks. Unchanged frames reuse the pixel buffer;
+pointer motion that stays within the same visual state does not request redraws.
+Switch animations schedule frames until their final state has been presented.
+
+```sh
+cargo run --locked -p halley-ui-demo -- --benchmark
+```
+
+This prints median and 95th-percentile input, changed-frame, and unchanged-frame
+times for 48 warm samples in each theme at 800×1040. It excludes font startup,
+native buffer presentation, compositor rendering, and display latency. Timing
+thresholds are not CI assertions; compare on the same machine and build profile.
+See the [recorded comparison](../docs/verification/demo-performance.md).

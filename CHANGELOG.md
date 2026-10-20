@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Optimize development demo rendering, reuse unchanged frames, and avoid redraws
+  for pointer motion that does not change visual state. Run checks on a worker
+  thread and add repeatable warm-frame benchmarks and redraw regressions.
+- Temporarily hide demo focus outlines on non-input controls, while preserving
+  text-input focus borders and keyboard navigation.
+
 - Add an unpublished internal demo with settings and component-state pages,
   light/dark selection, and a shared interactive/headless settings scenario.
 - Run demo regressions in CI and retain per-theme screenshot review artifacts.

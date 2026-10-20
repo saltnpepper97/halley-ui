@@ -1,12 +1,18 @@
 //! Native window and event translation only. All application behavior lives in Demo.
 use halley_ui::{InputEvent, Key, Modifiers, Point};
 use halley_ui_demo::{Appearance, Demo, Result, scenario};
-use std::{num::NonZeroU32, rc::Rc, time::Instant};
+use std::{
+    num::NonZeroU32,
+    rc::Rc,
+    sync::mpsc::{self, Receiver},
+    thread,
+    time::Instant,
+};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
     event::{MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, EventLoop},
+    event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     keyboard::{Key as NativeKey, NamedKey},
     platform::wayland::WindowAttributesExtWayland,
     window::{Window, WindowId},
@@ -19,6 +25,8 @@ struct Host {
     cursor: Point,
     modifiers: Modifiers,
     last_tick: Instant,
+    wake: EventLoopProxy<()>,
+    checks: Option<Receiver<std::result::Result<scenario::Report, String>>>,
 }
 impl Host {
     fn tick(&mut self) {
@@ -54,19 +62,21 @@ impl Host {
         self.tick();
         let previous_appearance = self.demo.appearance;
         self.demo.input(input)?;
-        if self.demo.take_run_request() {
-            let (width, height, scale) = self.demo.viewport();
-            match scenario::run(self.demo.appearance, None) {
-                Ok(report) => {
-                    self.demo = report.demo;
-                    self.demo.resize(width, height, scale)?;
-                    // Replay uses a focused headless view; resynchronize real window focus.
-                    let focused = self.window.as_ref().is_some_and(|w| w.has_focus());
-                    self.demo.input(InputEvent::WindowFocus(focused))?;
-                }
-                Err(error) => self.demo.set_status(format!("Check failed: {error}")),
-            }
-            self.last_tick = Instant::now();
+        if self.demo.take_run_request() && self.checks.is_none() {
+            let mode = self.demo.appearance;
+            let (sender, receiver) = mpsc::channel();
+            let wake = self.wake.clone();
+            thread::Builder::new()
+                .name("demo-checks".into())
+                .spawn(move || {
+                    let result = std::panic::catch_unwind(|| scenario::run(mode, None))
+                        .map_err(|_| "Scenario panicked".to_string())
+                        .and_then(|result| result.map_err(|error| error.to_string()));
+                    let _ = sender.send(result);
+                    let _ = wake.send_event(());
+                })?;
+            self.checks = Some(receiver);
+            self.demo.set_status("Running checks…");
         }
         if previous_appearance != self.demo.appearance {
             self.window
@@ -74,10 +84,12 @@ impl Host {
                 .ok_or("missing window")?
                 .set_theme(Some(native_theme(self.demo.appearance)));
         }
-        self.window
-            .as_ref()
-            .ok_or("missing window")?
-            .request_redraw();
+        if self.demo.needs_redraw() || self.demo.stack.has_animations() {
+            self.window
+                .as_ref()
+                .ok_or("missing window")?
+                .request_redraw();
+        }
         Ok(())
     }
 }
@@ -105,6 +117,36 @@ fn mapped(key: &NativeKey) -> Option<Key> {
     })
 }
 impl ApplicationHandler for Host {
+    fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
+        let Some(receiver) = self.checks.take() else {
+            return;
+        };
+        let result = receiver
+            .try_recv()
+            .map_err(|error| error.to_string())
+            .and_then(|result| result);
+        let applied = (|| -> Result<()> {
+            let report = result.map_err(|error| format!("Check failed: {error}"))?;
+            let (width, height, scale) = self.demo.viewport();
+            let appearance = self.demo.appearance;
+            self.demo = report.demo;
+            self.demo.set_appearance(appearance);
+            self.demo.resize(width, height, scale)?;
+            let focused = self
+                .window
+                .as_ref()
+                .is_some_and(|window| window.has_focus());
+            self.demo.input(InputEvent::WindowFocus(focused))?;
+            Ok(())
+        })();
+        if let Err(error) = applied {
+            self.demo.set_status(error.to_string());
+        }
+        self.last_tick = Instant::now();
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -240,13 +282,17 @@ impl ApplicationHandler for Host {
     }
 }
 pub fn run(appearance: Appearance) -> Result<()> {
-    EventLoop::new()?.run_app(&mut Host {
+    let event_loop = EventLoop::new()?;
+    let wake = event_loop.create_proxy();
+    event_loop.run_app(&mut Host {
         demo: Demo::new(appearance)?,
         window: None,
         surface: None,
         cursor: Point::default(),
         modifiers: Modifiers::default(),
         last_tick: Instant::now(),
+        wake,
+        checks: None,
     })?;
     Ok(())
 }

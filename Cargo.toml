@@ -37,3 +37,11 @@ features = ["accessibility-unix"]
 [dev-dependencies]
 accesskit_consumer = "0.39.1"
 zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+
+# Keep the software drawing loop responsive in the development workbench.
+# Debug information and overflow checks still use the dev-profile defaults.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package.halley-ui]
+opt-level = 3

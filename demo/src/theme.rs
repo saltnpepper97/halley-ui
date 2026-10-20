@@ -97,7 +97,7 @@ impl Appearance {
         let focus = Style {
             outline: Some(Outline {
                 color: p.accent,
-                width: 2.0 * scale,
+                width: 0.0,
             }),
             ..Default::default()
         };
