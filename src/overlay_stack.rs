@@ -300,6 +300,22 @@ impl UiStack {
         }
         Ok(changed)
     }
+    /// Silent numeric update, including inactive layers.
+    pub fn set_slider_value(
+        &mut self,
+        layer: &LayerId,
+        key: &str,
+        value: f64,
+    ) -> Result<bool, OverlayError> {
+        let view = self
+            .view_mut(layer)
+            .ok_or_else(|| OverlayError::InactiveLayer(layer.clone()))?;
+        let changed = view.set_slider_value(key, value)?;
+        if changed {
+            self.invalidate(false);
+        }
+        Ok(changed)
+    }
     /// Programmatic boolean update without a user event, including inactive layers.
     pub fn set_checked(
         &mut self,
@@ -819,6 +835,8 @@ impl UiStack {
             | AccessibleAction::Activate(key)
             | AccessibleAction::Reveal(key)
             | AccessibleAction::SetValue { key, .. }
+            | AccessibleAction::SetNumericValue { key, .. }
+            | AccessibleAction::AdjustNumericValue { key, .. }
             | AccessibleAction::SetSelection { key, .. }
             | AccessibleAction::Scroll { key, .. } => key,
         };
@@ -861,6 +879,7 @@ fn window_focus(view: &mut UiView, focused: bool) {
     } else {
         view.state.window_focused = focused;
         if !focused {
+            view.state.slider_drag = None;
             view.state.pressed = None;
             view.state.choice_space = None;
             view.state.dragging = false;
@@ -873,6 +892,7 @@ fn window_focus(view: &mut UiView, focused: bool) {
     }
 }
 fn cancel_capture(view: &mut UiView) {
+    view.state.slider_drag = None;
     view.state.choice_space = None;
     if view.state.pressed.take().is_some() || view.state.dragging {
         view.state.dragging = false;

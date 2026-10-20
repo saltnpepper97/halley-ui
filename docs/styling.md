@@ -36,6 +36,8 @@ let destructive = Button::new("delete", "Delete").style(StyleSheet {
 
 `Style` controls fill, text, border color/width, rounding, and an outline. Text
 inputs additionally use placeholder, selection, caret, and preedit colors.
+For [sliders](components/slider.md), `selection` colors the filled track and
+`text` colors the label and thumb; `Theme::forms` supplies slider dimensions.
 An outline shares the control's bounds and resolved radius; an outline width of
 zero explicitly disables it. Setting a field to `None` means inheritance, so use
 a transparent color or zero width when you want to hide something.

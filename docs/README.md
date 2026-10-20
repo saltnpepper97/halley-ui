@@ -10,6 +10,7 @@ translate your host's input events into the toolkit's event types.
 - [Label](components/label.md): fonts, colors, alignment, and truncation.
 - [Button](components/button.md): actions, disabled state, and keyboard activation.
 - [Checkbox, Switch, and RadioGroup](components/forms.md): retained values and form interaction.
+- [Slider](components/slider.md): numeric ranges, steps, pointer dragging, and keyboard adjustment.
 - [TextInput](components/text-input.md): values, selection, clipboard, and composition.
 - [Scroll](components/scroll.md): viewports, wheel movement, and focus reveal.
 - [List and ListItem](components/list.md): selection, keyboard navigation, and focus control.
@@ -27,6 +28,8 @@ The toolkit owns UI state and produces paint, hit, and semantic geometry. Your
 application owns its event loop, display connection, native window, renderer,
 clipboard, input method, business actions, and repaint scheduling.
 
-Maintainers can find historical checks in [verification](verification/README.md)
-and the deferred GPU migration in [reintegration](reintegration/README.md).
+Maintainers can use the [internal demo](https://github.com/saltnpepper97/halley-ui/blob/main/demo/README.md)
+for interactive light/dark review and repeatable settings checks. Historical checks
+are in [verification](verification/README.md), with the deferred GPU migration in
+[reintegration](reintegration/README.md).
 These repository-only archives are not shipped as supported backends.

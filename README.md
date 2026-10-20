@@ -51,7 +51,7 @@ with that same snapshot so paint, hits, and IME geometry agree.
 
 - **Components:** cards, containers, rows, columns, labels, buttons, images,
   single-line text inputs, clipped scroll containers, selectable lists,
-  checkboxes, switches, and radio groups.
+  checkboxes, switches, radio groups, and numeric sliders.
 - **Overlays:** `UiStack` composes popovers, menus, and modal dialogs with placement,
   dismissal, scoped input, and focus restoration.
 - **Styling:** partial theme and widget rules for hover, press, focus, selection,
@@ -79,6 +79,10 @@ real input-method journeys still need validation in each consuming application.
 
 Run `cargo test --all-features` and
 `cargo clippy --all-features --all-targets -- -D warnings`.
+
+For the maintained settings demo and light/dark component gallery, run
+`cargo run --locked -p halley-ui-demo`. See the [internal demo guide](https://github.com/saltnpepper97/halley-ui/blob/main/demo/README.md)
+for repeatable checks and screenshots.
 
 GPL-3.0-only. Shared text/rendering code was extracted from Halley under its
 existing license. Historical migration evidence and the deferred GPU prototype

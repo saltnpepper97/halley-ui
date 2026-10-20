@@ -29,8 +29,8 @@ pub use geometry::{Color, Insets, Point, Rect, Size};
 pub use text::{Font, TextOverflow, TextSystem};
 pub use ui::{
     ActionId, Anchor, Button, Card, Checkbox, Column, Container, FormMetrics, Image,
-    InteractionError, Label, List, ListItem, RadioGroup, RadioOption, Row, Scroll, Switch,
-    TextInput, Theme, UiView, Widget,
+    InteractionError, Label, List, ListItem, NumericValue, RadioGroup, RadioOption, Row, Scroll,
+    Slider, SliderRange, Switch, TextInput, Theme, UiView, Widget,
 };
 
 pub use input::{InputEvent, Key, Modifiers, UiEvent};

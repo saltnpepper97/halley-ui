@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Optimize development demo rendering, reuse unchanged frames, and avoid redraws
+  for pointer motion that does not change visual state. Run checks on a worker
+  thread and add repeatable warm-frame benchmarks and redraw regressions.
+- Temporarily hide demo focus outlines on non-input controls, while preserving
+  text-input focus borders and keyboard navigation.
+
+- Add an unpublished internal demo with settings and component-state pages,
+  light/dark selection, and a shared interactive/headless settings scenario.
+- Run demo regressions in CI and retain per-theme screenshot review artifacts.
+
+- Add horizontal Slider controls with retained numeric values, optional steps,
+  silent setters, pointer capture, keyboard adjustment, and overlay integration.
+- Add theme-driven slider metrics/styles and numeric accessibility semantics and
+  actions. See the slider guide for API additions and integration details.
+
 - Center the standard checkbox glyph by its visible ink and draw it at native
   pixel size, without a custom symbol or scaling.
 - Add opt-in, host-clock-driven switch thumb/track motion with smooth reversal,

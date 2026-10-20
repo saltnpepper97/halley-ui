@@ -11,6 +11,14 @@ use unicode_segmentation::UnicodeSegmentation;
 pub use accesskit;
 #[derive(Clone, Debug)]
 pub enum AccessibleAction {
+    SetNumericValue {
+        key: String,
+        value: f64,
+    },
+    AdjustNumericValue {
+        key: String,
+        increase: bool,
+    },
     Focus(String),
     Activate(String),
     SetValue {
@@ -70,6 +78,7 @@ impl AccessibilityTree {
                 SemanticRole::Switch => Role::Switch,
                 SemanticRole::RadioGroup => Role::RadioGroup,
                 SemanticRole::RadioOption => Role::RadioButton,
+                SemanticRole::Slider => Role::Slider,
             };
             let mut node = Node::new(role);
             node.set_bounds(bounds(semantic.rect));
@@ -106,6 +115,28 @@ impl AccessibilityTree {
                 node.set_active_descendant(self.id(key, 0));
             }
             match semantic.role {
+                SemanticRole::Slider => {
+                    if semantic.label.is_none()
+                        && let Some(label) = &semantic.value
+                    {
+                        node.set_label(label.clone());
+                    }
+                    if let Some(numeric) = semantic.numeric_value {
+                        node.set_orientation(accesskit::Orientation::Horizontal);
+                        node.set_numeric_value(numeric.value);
+                        node.set_min_numeric_value(numeric.range.min);
+                        node.set_max_numeric_value(numeric.range.max);
+                        node.set_numeric_value_step(numeric.range.increment());
+                        node.set_numeric_value_jump(numeric.range.jump());
+                    }
+                    if !semantic.disabled {
+                        node.add_action(Action::Focus);
+                        node.add_action(Action::SetValue);
+                        node.add_action(Action::Increment);
+                        node.add_action(Action::Decrement);
+                        node.add_action(Action::ScrollIntoView);
+                    }
+                }
                 SemanticRole::Button
                 | SemanticRole::ListItem
                 | SemanticRole::MenuItem
@@ -241,7 +272,12 @@ impl AccessibilityTree {
             Action::Click => Some(AccessibleAction::Activate(key.clone())),
             Action::ScrollIntoView => Some(AccessibleAction::Reveal(key.clone())),
             Action::SetValue => {
-                if let Some(ActionData::Value(value)) = request.data {
+                if let Some(ActionData::NumericValue(value)) = request.data {
+                    Some(AccessibleAction::SetNumericValue {
+                        key: key.clone(),
+                        value,
+                    })
+                } else if let Some(ActionData::Value(value)) = request.data {
                     Some(AccessibleAction::SetValue {
                         key: key.clone(),
                         value: value.into(),
@@ -250,6 +286,10 @@ impl AccessibilityTree {
                     None
                 }
             }
+            Action::Increment | Action::Decrement => Some(AccessibleAction::AdjustNumericValue {
+                key: key.clone(),
+                increase: request.action == Action::Increment,
+            }),
             Action::SetScrollOffset => {
                 if let Some(ActionData::SetScrollOffset(point)) = request.data {
                     Some(AccessibleAction::Scroll {

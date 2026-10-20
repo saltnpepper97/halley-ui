@@ -10,6 +10,11 @@ keywords = ["ui", "layout", "taffy", "wayland", "accessibility"]
 categories = ["gui", "graphics"]
 include = ["src/**", "examples/**", "tests/**", "docs/components/**", "docs/README.md", "docs/input.md", "docs/rendering.md", "docs/accessibility.md", "docs/styling.md", "/README.md", "/LICENSE", "/CHANGELOG.md", "/Cargo.toml", "/Cargo.lock"]
 
+[workspace]
+members = ["demo"]
+default-members = ["."]
+resolver = "3"
+
 [features]
 default = []
 accessibility = ["dep:accesskit"]
@@ -32,3 +37,11 @@ features = ["accessibility-unix"]
 [dev-dependencies]
 accesskit_consumer = "0.39.1"
 zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+
+# Keep the software drawing loop responsive in the development workbench.
+# Debug information and overflow checks still use the dev-profile defaults.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package.halley-ui]
+opt-level = 3
