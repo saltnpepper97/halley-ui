@@ -108,6 +108,10 @@ impl From<ListItem> for Widget {
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum InteractionError {
+    #[error("control is not a slider: {0}")]
+    NotSlider(String),
+    #[error("numeric value must be finite")]
+    InvalidNumericValue,
     #[error("control is not a checkbox or switch: {0}")]
     NotCheckable(String),
     #[error("control is not a radio group: {0}")]
@@ -142,6 +146,7 @@ pub(super) fn validate(
                     | Kind::TextInput { .. }
                     | Kind::List { .. }
                     | Kind::Scroll
+                    | Kind::Slider { .. }
                     | Kind::Checkbox { .. }
                     | Kind::Switch { .. }
                     | Kind::RadioGroup { .. }

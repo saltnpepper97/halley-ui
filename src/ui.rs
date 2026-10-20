@@ -119,6 +119,12 @@ enum Kind {
         action: ActionId,
         disabled: bool,
     },
+    Slider {
+        label: String,
+        initial: f64,
+        range: SliderRange,
+        disabled: bool,
+    },
     Checkbox {
         text: String,
         initial: bool,
@@ -401,6 +407,10 @@ pub use lists::{InteractionError, List, ListItem};
 #[path = "forms.rs"]
 mod forms;
 pub use forms::{Checkbox, FormMetrics, RadioGroup, RadioOption, Switch};
+#[path = "sliders.rs"]
+mod sliders;
+pub use sliders::{NumericValue, Slider, SliderRange};
+pub(crate) use sliders::{SliderDrag, SliderState};
 #[path = "overlays.rs"]
 pub mod overlays;
 
@@ -456,6 +466,7 @@ pub enum ControlKind {
     TextInput { read_only: bool },
     List,
     ListItem { list: String, action: ActionId },
+    Slider { range: SliderRange, thumb_size: f32 },
     Checkbox,
     Switch,
     RadioGroup,
@@ -496,6 +507,7 @@ pub enum SemanticRole {
     Menu,
     MenuItem,
     Dialog,
+    Slider,
     Checkbox,
     Switch,
     RadioGroup,
@@ -518,6 +530,7 @@ pub struct SemanticNode {
     pub invalid: bool,
     pub modal: bool,
     pub checked: Option<bool>,
+    pub numeric_value: Option<NumericValue>,
 }
 #[derive(Clone, Debug, Default)]
 pub struct PreparedView {
@@ -584,6 +597,8 @@ impl PreparedView {
 
 #[derive(Debug, thiserror::Error)]
 pub enum LayoutError {
+    #[error("slider range, step, and initial value must be finite and valid: {0}")]
+    InvalidSlider(String),
     #[error("radio options must be direct children of a radio group: {0}")]
     InvalidRadioOption(String),
     #[error("duplicate widget key: {0}")]
@@ -651,6 +666,9 @@ impl UiView {
     pub fn set_content(&mut self, value: impl Into<Widget>) {
         let value = value.into();
         if self.root != value {
+            if self.state.slider_drag.take().is_some() {
+                self.state.pressed = None;
+            }
             self.root = value;
             self.content_revision = self.content_revision.wrapping_add(1);
             self.cached = None;
@@ -693,6 +711,7 @@ impl UiView {
     ) -> Result<&PreparedView, LayoutError> {
         lists::validate(&self.root, false, false)?;
         forms::validate(&self.root, false)?;
+        sliders::validate(&self.root)?;
         self.sync_state();
         if self
             .cached
@@ -765,6 +784,21 @@ impl UiView {
                                 size.width.max(*min_width) + adornment.width,
                                 size.height.max(adornment.height),
                             )
+                        }
+                        Some(Measurement::Slider {
+                            label,
+                            font,
+                            color,
+                            width,
+                            thumb,
+                            gap,
+                        }) => {
+                            let height = if label.is_empty() {
+                                0.0
+                            } else {
+                                measure(font, label, *color).height + gap
+                            };
+                            Size::new(*width, height + thumb)
                         }
                         Some(Measurement::Fixed(size)) => *size,
                         None => Size::default(),
@@ -839,6 +873,14 @@ impl UiView {
     }
 }
 enum Measurement {
+    Slider {
+        label: String,
+        font: Font,
+        color: Color,
+        width: f32,
+        thumb: f32,
+        gap: f32,
+    },
     Text {
         value: String,
         font: Font,
@@ -966,6 +1008,14 @@ fn build_tree(
                     min_width: 0.0,
                     adornment: Size::default(),
                 },
+                Kind::Slider { label, .. } => Measurement::Slider {
+                    label: label.clone(),
+                    font: visual.font.clone(),
+                    color: visual.text,
+                    width: theme.forms.slider_width,
+                    thumb: theme.forms.slider_thumb_size,
+                    gap: theme.forms.indicator_gap,
+                },
                 Kind::Checkbox { text, .. }
                 | Kind::Switch { text, .. }
                 | Kind::RadioOption { text, .. } => {
@@ -1071,6 +1121,15 @@ fn paint_tree(
         }
         Kind::Image { .. } => (SemanticRole::Image, None, false, false, None),
         Kind::Scroll => (SemanticRole::Scroll, None, false, false, None),
+        Kind::Slider {
+            label, disabled, ..
+        } => (
+            SemanticRole::Slider,
+            Some(label.clone()),
+            *disabled,
+            false,
+            None,
+        ),
         Kind::Checkbox { text, disabled, .. } => (
             SemanticRole::Checkbox,
             Some(text.clone()),
@@ -1106,6 +1165,10 @@ fn paint_tree(
         selection,
         invalid: widget.invalid,
         modal: false,
+        numeric_value: state.sliders.get(&widget.key).map(|s| NumericValue {
+            value: s.value,
+            range: s.range,
+        }),
         checked: if forms::is_choice(&widget.kind) {
             Some(visual.state.selected)
         } else {
@@ -1200,6 +1263,19 @@ fn paint_tree(
                 caret: Rect::default(),
             });
         }
+        Kind::Slider { .. } => sliders::paint(
+            widget,
+            rect,
+            content,
+            clip,
+            namespace,
+            visual,
+            state,
+            theme,
+            scroll_ancestors,
+            measure,
+            out,
+        ),
         Kind::Checkbox { .. } | Kind::Switch { .. } | Kind::RadioOption { .. } => {
             forms::paint_choice(
                 widget,

@@ -184,6 +184,9 @@ impl From<RadioOption> for Widget {
 /// State-independent geometry; colors and surfaces use component style rules.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FormMetrics {
+    pub slider_width: f32,
+    pub slider_track_height: f32,
+    pub slider_thumb_size: f32,
     pub indicator_size: f32,
     pub switch_width: f32,
     pub indicator_gap: f32,
@@ -193,6 +196,9 @@ pub struct FormMetrics {
 impl Default for FormMetrics {
     fn default() -> Self {
         Self {
+            slider_width: 180.0,
+            slider_track_height: 4.0,
+            slider_thumb_size: 18.0,
             indicator_size: 18.0,
             switch_width: 34.0,
             indicator_gap: 8.0,
@@ -204,6 +210,9 @@ impl Default for FormMetrics {
 impl FormMetrics {
     pub(super) fn validate(&self) -> Result<(), LayoutError> {
         if [
+            self.slider_width,
+            self.slider_track_height,
+            self.slider_thumb_size,
             self.indicator_size,
             self.switch_width,
             self.indicator_gap,
@@ -215,6 +224,10 @@ impl FormMetrics {
         ]
         .into_iter()
         .all(|v| v.is_finite() && v >= 0.0)
+            && self.slider_thumb_size > 0.0
+            && self.slider_track_height > 0.0
+            && self.slider_width > self.slider_thumb_size
+            && self.slider_track_height <= self.slider_thumb_size
             && self.switch_width >= self.indicator_size
         {
             Ok(())

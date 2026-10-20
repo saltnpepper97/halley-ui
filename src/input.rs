@@ -78,6 +78,10 @@ pub enum InputEvent {
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiEvent {
     Activate(ActionId),
+    SliderChanged {
+        key: String,
+        value: f64,
+    },
     CheckedChanged {
         key: String,
         checked: bool,
@@ -328,6 +332,8 @@ impl SwitchMotion {
 
 #[derive(Default)]
 pub(crate) struct State {
+    pub sliders: HashMap<String, crate::ui::SliderState>,
+    pub slider_drag: Option<crate::ui::SliderDrag>,
     pub switch_duration: Duration,
     pub switches: HashMap<String, SwitchMotion>,
     pub checked: HashMap<String, bool>,
@@ -397,6 +403,14 @@ impl State {
             radios ^= h.finish();
         }
         radios.hash(&mut hash);
+        let mut sliders = 0u64;
+        for (key, slider) in &self.sliders {
+            let mut h = DefaultHasher::new();
+            key.hash(&mut h);
+            slider.value.to_bits().hash(&mut h);
+            sliders ^= h.finish();
+        }
+        sliders.hash(&mut hash);
         hash.finish()
     }
 }

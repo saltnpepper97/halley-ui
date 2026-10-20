@@ -60,6 +60,7 @@ pub struct ComponentStyles {
     pub list_item: StyleSheet,
     pub menu: StyleSheet,
     pub menu_item: StyleSheet,
+    pub slider: StyleSheet,
     pub checkbox: StyleSheet,
     pub switch: StyleSheet,
     pub radio_group: StyleSheet,
@@ -270,6 +271,7 @@ impl Theme {
                 &self.styles.list_item,
                 &self.styles.menu,
                 &self.styles.menu_item,
+                &self.styles.slider,
                 &self.styles.checkbox,
                 &self.styles.switch,
                 &self.styles.radio_group,
@@ -302,6 +304,7 @@ pub(super) fn resolve_tree(
         let is_input = matches!(widget.kind, Kind::TextInput { .. });
         let is_list = matches!(widget.kind, Kind::List { .. });
         let is_item = matches!(widget.kind, Kind::ListItem { .. });
+        let is_slider = matches!(widget.kind, Kind::Slider { .. });
         let is_choice = super::forms::is_choice(&widget.kind);
         let is_radio = matches!(widget.kind, Kind::RadioOption { .. });
         let disabled = match widget.kind {
@@ -309,6 +312,7 @@ pub(super) fn resolve_tree(
             | Kind::TextInput { disabled, .. }
             | Kind::List { disabled, .. }
             | Kind::ListItem { disabled, .. }
+            | Kind::Slider { disabled, .. }
             | Kind::Checkbox { disabled, .. }
             | Kind::Switch { disabled, .. }
             | Kind::RadioGroup { disabled, .. }
@@ -345,6 +349,7 @@ pub(super) fn resolve_tree(
             Kind::Card { style } => style.unwrap_or(theme.card),
             Kind::Button { .. }
             | Kind::TextInput { .. }
+            | Kind::Slider { .. }
             | Kind::Checkbox { .. }
             | Kind::Switch { .. }
             | Kind::RadioOption { .. } => theme.button,
@@ -375,7 +380,7 @@ pub(super) fn resolve_tree(
                 theme.spacing.button_padding
             } else if is_input {
                 theme.spacing.text_input_padding
-            } else if is_choice {
+            } else if is_choice || is_slider {
                 theme.forms.padding
             } else if is_item {
                 theme.spacing.list_item_padding
@@ -401,6 +406,8 @@ pub(super) fn resolve_tree(
             Some(&theme.styles.text_input)
         } else if is_list {
             Some(&theme.styles.list)
+        } else if is_slider {
+            Some(&theme.styles.slider)
         } else if matches!(widget.kind, Kind::Checkbox { .. }) {
             Some(&theme.styles.checkbox)
         } else if matches!(widget.kind, Kind::Switch { .. }) {
@@ -451,7 +458,7 @@ pub(super) fn resolve_tree(
             }
         }
         if flags.hovered {
-            if is_button || is_choice || (is_item && !selected) {
+            if is_button || is_choice || is_slider || (is_item && !selected) {
                 resolved.surface.fill = theme.button_hover;
             }
             for sheet in &layers {
@@ -459,7 +466,7 @@ pub(super) fn resolve_tree(
             }
         }
         if flags.pressed {
-            if is_button || is_choice {
+            if is_button || is_choice || is_slider {
                 resolved.surface.fill = theme.button_pressed;
             }
             for sheet in &layers {
@@ -467,7 +474,7 @@ pub(super) fn resolve_tree(
             }
         }
         if focused {
-            if is_button || is_list || is_choice {
+            if is_button || is_list || is_choice || is_slider {
                 resolved.outline.width = 2.0;
             }
             if is_input {
@@ -485,10 +492,13 @@ pub(super) fn resolve_tree(
             }
         }
         if disabled {
-            if is_button || is_input || is_item || is_choice {
+            if is_slider {
+                resolved.selection.a *= 0.5;
+            }
+            if is_button || is_input || is_item || is_choice || is_slider {
                 resolved.surface.fill.a *= 0.5;
             }
-            if is_item || is_choice {
+            if is_item || is_choice || is_slider {
                 resolved.text = theme.subtext;
             }
             for sheet in &layers {

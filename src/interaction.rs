@@ -53,6 +53,9 @@ impl UiView {
                 | Kind::Checkbox {
                     disabled: false, ..
                 }
+                | Kind::Slider {
+                    disabled: false, ..
+                }
                 | Kind::Switch {
                     disabled: false, ..
                 }
@@ -93,6 +96,7 @@ impl UiView {
         }
         self.sync_lists();
         self.sync_forms();
+        self.sync_sliders();
         let mut inputs = HashSet::new();
         let mut scrolls = HashSet::new();
         let mut focusable = HashSet::new();
@@ -124,6 +128,7 @@ impl UiView {
             self.state.pressed = None;
             self.state.choice_space = None;
             self.state.dragging = false;
+            self.state.slider_drag = None;
         }
     }
     pub fn focused(&self) -> Option<&str> {
@@ -187,6 +192,7 @@ impl UiView {
             InputEvent::WindowFocus(value) => {
                 self.state.window_focused = value;
                 if !value {
+                    self.state.slider_drag = None;
                     self.state.pressed = None;
                     self.state.choice_space = None;
                     self.state.dragging = false;
@@ -197,6 +203,7 @@ impl UiView {
                 }
             }
             InputEvent::PointerDown { position, shift } => {
+                self.state.slider_drag = None;
                 self.state.choice_space = None;
                 let control = hit(position);
                 let focus = control.map(|c| match &c.kind {
@@ -211,6 +218,13 @@ impl UiView {
                 }
                 self.state.pressed = control.map(|c| c.key.clone());
                 self.state.dragging = false;
+                if let Some(control) = control {
+                    self.slider_pointer(
+                        control,
+                        &InputEvent::PointerDown { position, shift },
+                        &mut out,
+                    );
+                }
                 if let Some(control) = control
                     && matches!(control.kind, ControlKind::TextInput { .. })
                 {
@@ -225,6 +239,14 @@ impl UiView {
             }
             InputEvent::PointerMove { position } => {
                 self.state.hover = hit(position).map(|c| c.key.clone());
+                if let Some(drag) = &self.state.slider_drag
+                    && let Some(control) = scene
+                        .controls
+                        .iter()
+                        .find(|c| c.key == drag.key && !c.disabled)
+                {
+                    self.slider_pointer(control, &InputEvent::PointerMove { position }, &mut out);
+                }
                 if self.state.dragging
                     && let Some(key) = &self.state.pressed
                     && let Some(control) = scene.controls.iter().find(|c| &c.key == key)
@@ -238,6 +260,15 @@ impl UiView {
                 }
             }
             InputEvent::PointerUp { position } => {
+                if let Some(drag) = &self.state.slider_drag
+                    && let Some(control) = scene
+                        .controls
+                        .iter()
+                        .find(|c| c.key == drag.key && !c.disabled)
+                {
+                    self.slider_pointer(control, &InputEvent::PointerUp { position }, &mut out);
+                }
+                self.state.slider_drag = None;
                 if !self.state.dragging
                     && self.state.choice_space.is_none()
                     && let Some(control) = hit(position)
@@ -254,6 +285,7 @@ impl UiView {
                 self.state.dragging = false;
             }
             InputEvent::PointerCancel => {
+                self.state.slider_drag = None;
                 self.state.pressed = None;
                 self.state.choice_space = None;
                 self.state.dragging = false;
@@ -317,7 +349,8 @@ impl UiView {
             InputEvent::KeyDown {
                 key: Key::Escape, ..
             } => {
-                if self.state.choice_space.take().is_some()
+                if self.state.slider_drag.take().is_some()
+                    || self.state.choice_space.take().is_some()
                     || scene.controls.iter().any(|c| {
                         self.state.pressed.as_deref() == Some(c.key.as_str())
                             && matches!(
@@ -349,6 +382,9 @@ impl UiView {
                     .find(|c| !c.disabled && self.state.focus.as_deref() == Some(c.key.as_str()))
                 {
                     match &control.kind {
+                        ControlKind::Slider { .. } if !modifiers.control && !modifiers.alt => {
+                            self.slider_key(&control.key, key, &mut out);
+                        }
                         ControlKind::Checkbox
                         | ControlKind::Switch
                         | ControlKind::RadioOption { .. }
@@ -522,6 +558,7 @@ impl UiView {
                 editor.preedit = None;
             }
             self.state.focus = key;
+            self.state.slider_drag = None;
             self.state.choice_space = None;
             self.state.pending_paste = None;
             self.state.pressed = None;
@@ -685,6 +722,35 @@ impl UiView {
         };
         let mut out = Vec::new();
         match action {
+            AccessibleAction::SetNumericValue { key, value } => {
+                if scene.controls.iter().any(|c| {
+                    c.key == key && !c.disabled && matches!(c.kind, ControlKind::Slider { .. })
+                }) {
+                    let before = self.slider_value(&key);
+                    self.user_slider_value(&key, value, &mut out);
+                    if before != self.slider_value(&key)
+                        && self
+                            .state
+                            .slider_drag
+                            .as_ref()
+                            .is_some_and(|d| d.key == key)
+                    {
+                        self.state.slider_drag = None;
+                        self.state.pressed = None;
+                    }
+                }
+            }
+            AccessibleAction::AdjustNumericValue { key, increase } => {
+                if scene.controls.iter().any(|c| {
+                    c.key == key && !c.disabled && matches!(c.kind, ControlKind::Slider { .. })
+                }) {
+                    self.slider_key(
+                        &key,
+                        if increase { Key::Right } else { Key::Left },
+                        &mut out,
+                    );
+                }
+            }
             AccessibleAction::Focus(key) => {
                 if scene
                     .controls

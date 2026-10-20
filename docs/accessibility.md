@@ -17,6 +17,10 @@ need labels; unlabelled images are decorative.
 radio-button roles with checked and disabled state. Accessible activation uses
 the same value-change events as pointer and keyboard input.
 
+[Sliders](components/slider.md) expose numeric values, min/max, step and jump
+sizes, and horizontal orientation. Numeric SetValue and Increment/Decrement
+requests follow the same clamping, snapping, and change events as direct input.
+
 For [overlays](components/overlays.md), publish the combined `UiStack` frame and
 route actions through the stack. Its active scope exposes menu/menu-item or
 modal-dialog semantics; background views are excluded until their scope resumes.

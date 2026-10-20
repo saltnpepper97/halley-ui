@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add horizontal Slider controls with retained numeric values, optional steps,
+  silent setters, pointer capture, keyboard adjustment, and overlay integration.
+- Add theme-driven slider metrics/styles and numeric accessibility semantics and
+  actions. See the slider guide for API additions and integration details.
+
 - Center the standard checkbox glyph by its visible ink and draw it at native
   pixel size, without a custom symbol or scaling.
 - Add opt-in, host-clock-driven switch thumb/track motion with smooth reversal,
