@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Center checkbox marks with font-independent vector assets.
+- Center the standard checkbox glyph by its visible ink and draw it at native
+  pixel size, without a custom symbol or scaling.
 - Add opt-in, host-clock-driven switch thumb/track motion with smooth reversal,
   an immediate reduced-motion path, and bounded animation lifetimes.
 

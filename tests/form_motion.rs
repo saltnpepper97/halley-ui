@@ -43,14 +43,13 @@ fn switch() -> UiView {
 }
 
 #[test]
-fn checkbox_ink_is_centered_at_different_sizes_and_independent_of_label_font() {
+fn checkbox_glyph_ink_is_centered_and_drawn_without_scaling_across_sizes_and_fonts() {
     for side in [12.0, 18.0, 22.0, 32.0, 64.0] {
         let mut view =
             UiView::new("check").content(Checkbox::new("check", "Checkbox").checked(true));
         let mut theme = Theme::default();
         theme.forms.indicator_size = side;
         theme.forms.switch_width = side.max(34.0);
-        let mut image_id = None;
         for family in ["sans-serif", "monospace"] {
             theme.font.family = family.into();
             let scene = view
@@ -58,11 +57,13 @@ fn checkbox_ink_is_centered_at_different_sizes_and_independent_of_label_font() {
                     Size::new(80.0, 20.0)
                 })
                 .unwrap();
-            let image = scene
+            let (rect, image) = scene
                 .items
                 .iter()
                 .find_map(|item| match item {
-                    PaintItem::Image { key, data, .. } if key == "check/check/mark" => Some(data),
+                    PaintItem::Image {
+                        key, rect, data, ..
+                    } if key == "check/check/mark" => Some((rect, data)),
                     _ => None,
                 })
                 .unwrap();
@@ -80,19 +81,57 @@ fn checkbox_ink_is_centered_at_different_sizes_and_independent_of_label_font() {
                     bottom = bottom.max(y);
                 }
             }
-            assert!(left < right && top < bottom);
+            assert_eq!(
+                (left, top, right + 1, bottom + 1),
+                (0, 0, image.width(), image.height())
+            );
+            let indicator = scene
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    PaintItem::Card { key, rect, .. } if key == "check/check/indicator" => {
+                        Some(rect)
+                    }
+                    _ => None,
+                })
+                .unwrap();
             assert!(
-                ((left + right + 1) as f32 * 0.5 - image.width() as f32 * 0.5).abs() <= 0.5,
-                "horizontal ink offset at {side}"
+                (rect.origin.x + rect.size.width * 0.5 - indicator.origin.x - side * 0.5).abs()
+                    <= 0.5
             );
             assert!(
-                ((top + bottom + 1) as f32 * 0.5 - image.height() as f32 * 0.5).abs() <= 0.5,
-                "vertical ink offset at {side}"
+                (rect.origin.y + rect.size.height * 0.5 - indicator.origin.y - side * 0.5).abs()
+                    <= 0.5
             );
-            if let Some(id) = image_id {
-                assert_eq!(id, image.id());
-            } else {
-                image_id = Some(image.id());
+            assert_eq!(rect.size, image.size());
+            assert_eq!(rect.origin.x, rect.origin.x.round());
+            assert_eq!(rect.origin.y, rect.origin.y.round());
+            let only_mark = PreparedView {
+                items: scene
+                    .items
+                    .iter()
+                    .filter(|item| {
+                        matches!(item,
+                PaintItem::Image { key, .. } if key == "check/check/mark")
+                    })
+                    .cloned()
+                    .collect(),
+                ..Default::default()
+            };
+            let mut pixels = halley_ui::software::PixelBuffer::new(300, 150).unwrap();
+            pixels
+                .surface()
+                .draw(&only_mark, &mut halley_ui::TextSystem::new(), 1.0);
+            for y in 0..image.height() as usize {
+                for x in 0..image.width() as usize {
+                    let source = (y * image.width() as usize + x) * 4;
+                    let destination =
+                        ((rect.origin.y as usize + y) * 300 + rect.origin.x as usize + x) * 4;
+                    assert_eq!(
+                        &pixels.pixels()[destination..destination + 4],
+                        &image.pixels()[source..source + 4]
+                    );
+                }
             }
         }
     }

@@ -4,15 +4,21 @@ use super::*;
 use crate::{Key, UiEvent};
 use std::time::Duration;
 
-/// Small, bounded cache of font-independent checkbox marks, shared by repeated rows.
+/// Bounded cache of ordinary checkmark glyphs with transparent text padding removed.
 #[derive(Default)]
 pub(super) struct Assets {
-    marks: HashMap<(u16, [u8; 4]), Arc<ImageData>>,
+    marks: HashMap<(Font, [u8; 4]), Arc<ImageData>>,
 }
 impl Assets {
-    fn checkmark(&mut self, size: f32, color: Color) -> Arc<ImageData> {
-        use resvg::tiny_skia::{LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
-        let dimension = size.ceil().clamp(1.0, 256.0) as u16;
+    fn checkmark(
+        &mut self,
+        size: f32,
+        font: &Font,
+        color: Color,
+        text: &mut Option<TextSystem>,
+    ) -> Option<Arc<ImageData>> {
+        let mut font = font.normalized();
+        font.size = (size * 0.85).round().clamp(1.0, 256.0) as u16;
         let rgb = color.bytes();
         let rgba = [
             rgb[0],
@@ -20,42 +26,41 @@ impl Assets {
             rgb[2],
             (color.a.clamp(0.0, 1.0) * 255.0).round() as u8,
         ];
-        if let Some(mark) = self.marks.get(&(dimension, rgba)) {
-            return mark.clone();
+        if let Some(mark) = self.marks.get(&(font.clone(), rgba)) {
+            return Some(mark.clone());
         }
-        let side = f32::from(dimension);
-        let mut path = PathBuilder::new();
-        path.move_to(side * 0.25, side * 0.52);
-        path.line_to(side * 0.42, side * 0.69);
-        path.line_to(side * 0.75, side * 0.31);
-        let mut pixels = Pixmap::new(u32::from(dimension), u32::from(dimension)).unwrap();
-        let mut paint = Paint::default();
-        paint.set_color_rgba8(rgba[0], rgba[1], rgba[2], rgba[3]);
-        pixels.stroke_path(
-            &path.finish().unwrap(),
-            &paint,
-            &Stroke {
-                width: side * 0.105,
-                line_cap: LineCap::Round,
-                line_join: LineJoin::Round,
-                ..Default::default()
-            },
-            Transform::identity(),
-            None,
-        );
+        let raster = text
+            .get_or_insert_with(TextSystem::new)
+            .raster(&font, "✓", rgb)?;
+        let width = raster.width as usize;
+        let height = raster.height as usize;
+        let (mut left, mut top, mut right, mut bottom) = (width, height, 0, 0);
+        for (i, pixel) in raster.pixels.chunks_exact(4).enumerate() {
+            if pixel[3] != 0 {
+                left = left.min(i % width);
+                right = right.max(i % width + 1);
+                top = top.min(i / width);
+                bottom = bottom.max(i / width + 1);
+            }
+        }
+        if right <= left || bottom <= top {
+            return None;
+        }
+        let mut pixels = Vec::with_capacity((right - left) * (bottom - top) * 4);
+        for row in top..bottom {
+            for channel in &raster.pixels[(row * width + left) * 4..(row * width + right) * 4] {
+                pixels.push(((u16::from(*channel) * u16::from(rgba[3]) + 127) / 255) as u8);
+            }
+        }
         let mark = Arc::new(
-            ImageData::from_rgba(
-                u32::from(dimension),
-                u32::from(dimension),
-                pixels.take().into(),
-            )
-            .unwrap(),
+            ImageData::from_rgba((right - left) as u32, (bottom - top) as u32, pixels.into())
+                .unwrap(),
         );
         if self.marks.len() >= 32 {
             self.marks.clear();
         }
-        self.marks.insert((dimension, rgba), mark.clone());
-        mark
+        self.marks.insert((font, rgba), mark.clone());
+        Some(mark)
     }
 }
 
@@ -549,6 +554,7 @@ pub(super) fn paint_choice(
     measure: &mut impl FnMut(&Font, &str, Color) -> Size,
     out: &mut PreparedView,
     assets: &mut Assets,
+    glyph_text: &mut Option<TextSystem>,
 ) {
     let key = format!("{namespace}/{}", widget.key);
     let (text, kind) = match &widget.kind {
@@ -611,12 +617,19 @@ pub(super) fn paint_choice(
                 radius: dot * 0.5,
             },
         });
-    } else if checked {
+    } else if checked
+        && let Some(mark) = assets.checkmark(size.height, &visual.font, visual.text, glyph_text)
+    {
         out.items.push(PaintItem::Image {
             key: format!("{key}/mark"),
-            rect: indicator_rect,
+            rect: Rect::new(
+                (indicator_rect.origin.x + (size.width - mark.width() as f32) * 0.5).round(),
+                (indicator_rect.origin.y + (size.height - mark.height() as f32) * 0.5).round(),
+                mark.width() as f32,
+                mark.height() as f32,
+            ),
             clip: clip.intersection(indicator_rect),
-            data: assets.checkmark(size.height, visual.text),
+            data: mark,
         });
     }
     let left = size.width + theme.forms.indicator_gap;

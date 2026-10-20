@@ -1215,6 +1215,7 @@ fn paint_tree(
                 measure,
                 out,
                 form_assets,
+                editing_text,
             );
         }
         Kind::Button { text, action, .. } | Kind::ListItem { text, action, .. } => {

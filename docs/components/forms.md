@@ -105,8 +105,9 @@ and group gap. These metrics are state-independent and feed both measurement and
 painting. Switch width must be at least the indicator size; metrics must be finite
 and nonnegative. Explicit layout padding and group `gap` builders override theme
 defaults. Theme changes preserve values and recompute layout, clips, and painting.
-Checkbox marks use a centered vector asset independent of font bearings or glyph
-padding. The existing image paint path handles them in every renderer.
+Checkbox marks use the ordinary ✓ glyph. Transparent glyph padding is removed
+before centering the visible ink. The cropped glyph is drawn at its native pixel
+size on integer coordinates, avoiding image scaling or a custom drawn symbol.
 
 ## Switch motion
 
