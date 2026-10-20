@@ -119,6 +119,24 @@ enum Kind {
         action: ActionId,
         disabled: bool,
     },
+    Checkbox {
+        text: String,
+        initial: bool,
+        disabled: bool,
+    },
+    Switch {
+        text: String,
+        initial: bool,
+        disabled: bool,
+    },
+    RadioGroup {
+        initial_selection: Option<String>,
+        disabled: bool,
+    },
+    RadioOption {
+        text: String,
+        disabled: bool,
+    },
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Widget {
@@ -380,6 +398,9 @@ container!(Scroll, Kind::Scroll);
 #[path = "lists.rs"]
 mod lists;
 pub use lists::{InteractionError, List, ListItem};
+#[path = "forms.rs"]
+mod forms;
+pub use forms::{Checkbox, FormMetrics, RadioGroup, RadioOption, Switch};
 #[path = "overlays.rs"]
 pub mod overlays;
 
@@ -435,6 +456,10 @@ pub enum ControlKind {
     TextInput { read_only: bool },
     List,
     ListItem { list: String, action: ActionId },
+    Checkbox,
+    Switch,
+    RadioGroup,
+    RadioOption { group: String },
 }
 #[derive(Clone, Debug)]
 pub struct ControlRegion {
@@ -471,6 +496,10 @@ pub enum SemanticRole {
     Menu,
     MenuItem,
     Dialog,
+    Checkbox,
+    Switch,
+    RadioGroup,
+    RadioOption,
 }
 #[derive(Clone, Debug)]
 pub struct SemanticNode {
@@ -488,6 +517,7 @@ pub struct SemanticNode {
     pub active_descendant: Option<String>,
     pub invalid: bool,
     pub modal: bool,
+    pub checked: Option<bool>,
 }
 #[derive(Clone, Debug, Default)]
 pub struct PreparedView {
@@ -554,6 +584,8 @@ impl PreparedView {
 
 #[derive(Debug, thiserror::Error)]
 pub enum LayoutError {
+    #[error("radio options must be direct children of a radio group: {0}")]
+    InvalidRadioOption(String),
     #[error("duplicate widget key: {0}")]
     DuplicateKey(String),
     #[error("layout bounds and style values must be finite and nonnegative")]
@@ -658,6 +690,7 @@ impl UiView {
         mut measure: impl FnMut(&Font, &str, Color) -> Size,
     ) -> Result<&PreparedView, LayoutError> {
         lists::validate(&self.root, false, false)?;
+        forms::validate(&self.root, false)?;
         self.sync_state();
         if self
             .cached
@@ -723,9 +756,13 @@ impl UiView {
                             font,
                             color,
                             min_width,
+                            adornment,
                         }) => {
                             let size = measure(font, value, *color);
-                            Size::new(size.width.max(*min_width), size.height)
+                            Size::new(
+                                size.width.max(*min_width) + adornment.width,
+                                size.height.max(adornment.height),
+                            )
                         }
                         Some(Measurement::Fixed(size)) => *size,
                         None => Size::default(),
@@ -776,6 +813,7 @@ impl UiView {
                 &[],
                 None,
                 &styles,
+                theme,
             )?;
             if !self.state.pending_reveal.is_empty() {
                 let scene = interaction::InputScene::from(&prepared);
@@ -803,6 +841,7 @@ enum Measurement {
         font: Font,
         color: Color,
         min_width: f32,
+        adornment: Size,
     },
     Fixed(Size),
 }
@@ -824,7 +863,9 @@ fn build_tree(
     let padding = visual.padding;
     let gap = l
         .gap
-        .unwrap_or(if matches!(widget.kind, Kind::List { .. }) {
+        .unwrap_or(if matches!(widget.kind, Kind::RadioGroup { .. }) {
+            theme.forms.group_gap
+        } else if matches!(widget.kind, Kind::List { .. }) {
             theme.spacing.list_gap
         } else {
             theme.spacing.container_gap
@@ -920,7 +961,20 @@ fn build_tree(
                     font: visual.font.clone(),
                     color: visual.text,
                     min_width: 0.0,
+                    adornment: Size::default(),
                 },
+                Kind::Checkbox { text, .. }
+                | Kind::Switch { text, .. }
+                | Kind::RadioOption { text, .. } => {
+                    let size = forms::indicator(&widget.kind, theme);
+                    Measurement::Text {
+                        value: text.clone(),
+                        font: visual.font.clone(),
+                        color: visual.text,
+                        min_width: 0.0,
+                        adornment: Size::new(size.width + theme.forms.indicator_gap, size.height),
+                    }
+                }
                 Kind::TextInput { .. } => {
                     let value = state
                         .editors
@@ -931,6 +985,7 @@ fn build_tree(
                         font: visual.font.clone(),
                         color: visual.text,
                         min_width: 120.0,
+                        adornment: Size::default(),
                     }
                 }
                 Kind::Image { data } => Measurement::Fixed(data.size()),
@@ -958,6 +1013,7 @@ fn paint_tree(
     scroll_ancestors: &[String],
     list: Option<&Widget>,
     styles: &HashMap<String, ResolvedStyle>,
+    theme: &Theme,
 ) -> Result<(), LayoutError> {
     let visual = &styles[&widget.key];
     let padding = visual.padding;
@@ -1011,6 +1067,30 @@ fn paint_tree(
         }
         Kind::Image { .. } => (SemanticRole::Image, None, false, false, None),
         Kind::Scroll => (SemanticRole::Scroll, None, false, false, None),
+        Kind::Checkbox { text, disabled, .. } => (
+            SemanticRole::Checkbox,
+            Some(text.clone()),
+            *disabled,
+            false,
+            None,
+        ),
+        Kind::Switch { text, disabled, .. } => (
+            SemanticRole::Switch,
+            Some(text.clone()),
+            *disabled,
+            false,
+            None,
+        ),
+        Kind::RadioGroup { disabled, .. } => {
+            (SemanticRole::RadioGroup, None, *disabled, false, None)
+        }
+        Kind::RadioOption { text, disabled } => (
+            SemanticRole::RadioOption,
+            Some(text.clone()),
+            *disabled,
+            false,
+            None,
+        ),
         _ => (SemanticRole::Group, None, false, false, None),
     };
     out.semantics.push(SemanticNode {
@@ -1022,6 +1102,11 @@ fn paint_tree(
         selection,
         invalid: widget.invalid,
         modal: false,
+        checked: if forms::is_choice(&widget.kind) {
+            Some(visual.state.selected)
+        } else {
+            None
+        },
         selected: if matches!(widget.kind, Kind::ListItem { .. }) {
             Some(list.is_some_and(|l| {
                 state.lists.get(&l.key).and_then(|s| s.as_deref()) == Some(widget.key.as_str())
@@ -1076,7 +1161,8 @@ fn paint_tree(
                 color: visual.text,
             });
         }
-        Kind::List { .. } => {
+        Kind::List { .. } | Kind::RadioGroup { .. } => {
+            let radio = matches!(widget.kind, Kind::RadioGroup { .. });
             out.items.push(PaintItem::Card {
                 key: key.clone(),
                 rect,
@@ -1088,13 +1174,43 @@ fn paint_tree(
                 rect,
                 clip,
                 content,
-                kind: ControlKind::List,
-                disabled: visual.state.disabled,
+                kind: if radio {
+                    ControlKind::RadioGroup
+                } else {
+                    ControlKind::List
+                },
+                disabled: visual.state.disabled
+                    || (radio
+                        && !widget.children.iter().any(|c| {
+                            matches!(
+                                c.kind,
+                                Kind::RadioOption {
+                                    disabled: false,
+                                    ..
+                                }
+                            )
+                        })),
                 scroll_ancestors: scroll_ancestors.to_vec(),
                 line: None,
                 text_origin: content.origin,
                 caret: Rect::default(),
             });
+        }
+        Kind::Checkbox { .. } | Kind::Switch { .. } | Kind::RadioOption { .. } => {
+            forms::paint_choice(
+                widget,
+                list,
+                rect,
+                content,
+                clip,
+                namespace,
+                visual,
+                state,
+                theme,
+                scroll_ancestors,
+                measure,
+                out,
+            );
         }
         Kind::Button { text, action, .. } | Kind::ListItem { text, action, .. } => {
             let is_item = matches!(widget.kind, Kind::ListItem { .. });
@@ -1363,12 +1479,13 @@ fn paint_tree(
             state,
             editing_text,
             &ancestors,
-            if matches!(widget.kind, Kind::List { .. }) {
+            if matches!(widget.kind, Kind::List { .. } | Kind::RadioGroup { .. }) {
                 Some(widget)
             } else {
                 list
             },
             styles,
+            theme,
         )?;
     }
     Ok(())

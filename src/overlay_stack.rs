@@ -275,6 +275,38 @@ impl UiStack {
         }
         Ok(changed)
     }
+    /// Programmatic boolean update without a user event, including inactive layers.
+    pub fn set_checked(
+        &mut self,
+        layer: &LayerId,
+        key: &str,
+        value: bool,
+    ) -> Result<bool, OverlayError> {
+        let view = self
+            .view_mut(layer)
+            .ok_or_else(|| OverlayError::InactiveLayer(layer.clone()))?;
+        let changed = view.set_checked(key, value)?;
+        if changed {
+            self.invalidate(false);
+        }
+        Ok(changed)
+    }
+    /// Programmatic radio update without a user event, including inactive layers.
+    pub fn set_radio_selected(
+        &mut self,
+        layer: &LayerId,
+        group: &str,
+        option: Option<&str>,
+    ) -> Result<bool, OverlayError> {
+        let view = self
+            .view_mut(layer)
+            .ok_or_else(|| OverlayError::InactiveLayer(layer.clone()))?;
+        let changed = view.set_radio_selected(group, option)?;
+        if changed {
+            self.invalidate(false);
+        }
+        Ok(changed)
+    }
     pub fn prepare(
         &mut self,
         bounds: Rect,
@@ -805,6 +837,7 @@ fn window_focus(view: &mut UiView, focused: bool) {
         view.state.window_focused = focused;
         if !focused {
             view.state.pressed = None;
+            view.state.choice_space = None;
             view.state.dragging = false;
             view.state.pending_paste = None;
             for editor in view.state.editors.values_mut() {
@@ -815,6 +848,7 @@ fn window_focus(view: &mut UiView, focused: bool) {
     }
 }
 fn cancel_capture(view: &mut UiView) {
+    view.state.choice_space = None;
     if view.state.pressed.take().is_some() || view.state.dragging {
         view.state.dragging = false;
         view.invalidate();
@@ -861,6 +895,9 @@ fn append_input(out: &mut PreparedView, source: &PreparedView, layer: &LayerId) 
                 .collect();
             if let ControlKind::ListItem { list, .. } = &mut control.kind {
                 *list = layer.qualify(list);
+            }
+            if let ControlKind::RadioOption { group } = &mut control.kind {
+                *group = layer.qualify(group);
             }
             control
         })

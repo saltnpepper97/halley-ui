@@ -60,6 +60,10 @@ pub struct ComponentStyles {
     pub list_item: StyleSheet,
     pub menu: StyleSheet,
     pub menu_item: StyleSheet,
+    pub checkbox: StyleSheet,
+    pub switch: StyleSheet,
+    pub radio_group: StyleSheet,
+    pub radio_option: StyleSheet,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -118,6 +122,7 @@ pub struct Theme {
     pub typography: Typography,
     pub styles: ComponentStyles,
     pub overlays: super::overlays::OverlayTheme,
+    pub forms: super::forms::FormMetrics,
 }
 impl Default for Theme {
     fn default() -> Self {
@@ -145,6 +150,7 @@ impl Default for Theme {
             typography: Typography::default(),
             styles: ComponentStyles::default(),
             overlays: super::overlays::OverlayTheme::default(),
+            forms: super::forms::FormMetrics::default(),
         }
     }
 }
@@ -264,13 +270,18 @@ impl Theme {
                 &self.styles.list_item,
                 &self.styles.menu,
                 &self.styles.menu_item,
+                &self.styles.checkbox,
+                &self.styles.switch,
+                &self.styles.radio_group,
+                &self.styles.radio_option,
             ]
             .into_iter()
             .all(StyleSheet::valid)
         {
             return Err(LayoutError::InvalidStyle("theme".into()));
         }
-        self.overlays.validate()
+        self.overlays.validate()?;
+        self.forms.validate()
     }
 }
 
@@ -291,17 +302,31 @@ pub(super) fn resolve_tree(
         let is_input = matches!(widget.kind, Kind::TextInput { .. });
         let is_list = matches!(widget.kind, Kind::List { .. });
         let is_item = matches!(widget.kind, Kind::ListItem { .. });
+        let is_choice = super::forms::is_choice(&widget.kind);
+        let is_radio = matches!(widget.kind, Kind::RadioOption { .. });
         let disabled = match widget.kind {
             Kind::Button { disabled, .. }
             | Kind::TextInput { disabled, .. }
             | Kind::List { disabled, .. }
-            | Kind::ListItem { disabled, .. } => disabled,
+            | Kind::ListItem { disabled, .. }
+            | Kind::Checkbox { disabled, .. }
+            | Kind::Switch { disabled, .. }
+            | Kind::RadioGroup { disabled, .. }
+            | Kind::RadioOption { disabled, .. } => disabled,
             _ => false,
         } || parent.is_some_and(|p| p.state.disabled);
-        let selected = is_item
-            && list.is_some_and(|l| {
-                state.lists.get(&l.key).and_then(|s| s.as_deref()) == Some(widget.key.as_str())
-            });
+        let selected = if matches!(widget.kind, Kind::Checkbox { .. } | Kind::Switch { .. }) {
+            state.checked.get(&widget.key).copied().unwrap_or(false)
+        } else if is_radio {
+            list.is_some_and(|l| {
+                state.radios.get(&l.key).and_then(|s| s.as_deref()) == Some(widget.key.as_str())
+            })
+        } else {
+            is_item
+                && list.is_some_and(|l| {
+                    state.lists.get(&l.key).and_then(|s| s.as_deref()) == Some(widget.key.as_str())
+                })
+        };
         let focused = !disabled
             && state.window_focused
             && (state.focus.as_deref() == Some(widget.key.as_str())
@@ -316,9 +341,13 @@ pub(super) fn resolve_tree(
             invalid: widget.invalid,
         };
         let transparent = Color::rgba(0.0, 0.0, 0.0, 0.0);
-        let surface = match widget.kind {
+        let mut surface = match widget.kind {
             Kind::Card { style } => style.unwrap_or(theme.card),
-            Kind::Button { .. } | Kind::TextInput { .. } => theme.button,
+            Kind::Button { .. }
+            | Kind::TextInput { .. }
+            | Kind::Checkbox { .. }
+            | Kind::Switch { .. }
+            | Kind::RadioOption { .. } => theme.button,
             _ => CardStyle {
                 fill: transparent,
                 border: transparent,
@@ -330,6 +359,14 @@ pub(super) fn resolve_tree(
                 },
             },
         };
+        if is_choice {
+            surface.border_width = 1.0;
+            surface.radius = if matches!(widget.kind, Kind::Checkbox { .. }) {
+                theme.forms.indicator_size * 0.2
+            } else {
+                theme.forms.indicator_size * 0.5
+            };
+        }
         let mut resolved = ResolvedStyle {
             surface,
             text: parent.map_or(theme.text, |p| p.text),
@@ -338,6 +375,8 @@ pub(super) fn resolve_tree(
                 theme.spacing.button_padding
             } else if is_input {
                 theme.spacing.text_input_padding
+            } else if is_choice {
+                theme.forms.padding
             } else if is_item {
                 theme.spacing.list_item_padding
             } else {
@@ -362,6 +401,14 @@ pub(super) fn resolve_tree(
             Some(&theme.styles.text_input)
         } else if is_list {
             Some(&theme.styles.list)
+        } else if matches!(widget.kind, Kind::Checkbox { .. }) {
+            Some(&theme.styles.checkbox)
+        } else if matches!(widget.kind, Kind::Switch { .. }) {
+            Some(&theme.styles.switch)
+        } else if matches!(widget.kind, Kind::RadioGroup { .. }) {
+            Some(&theme.styles.radio_group)
+        } else if is_radio {
+            Some(&theme.styles.radio_option)
         } else if is_item {
             Some(&theme.styles.list_item)
         } else {
@@ -369,7 +416,7 @@ pub(super) fn resolve_tree(
         };
         let layers: Vec<_> = component
             .into_iter()
-            .chain(if is_item {
+            .chain(if is_item || is_radio {
                 list.and_then(|l| l.item_style.as_deref())
             } else {
                 None
@@ -404,7 +451,7 @@ pub(super) fn resolve_tree(
             }
         }
         if flags.hovered {
-            if is_button || (is_item && !selected) {
+            if is_button || is_choice || (is_item && !selected) {
                 resolved.surface.fill = theme.button_hover;
             }
             for sheet in &layers {
@@ -412,7 +459,7 @@ pub(super) fn resolve_tree(
             }
         }
         if flags.pressed {
-            if is_button {
+            if is_button || is_choice {
                 resolved.surface.fill = theme.button_pressed;
             }
             for sheet in &layers {
@@ -420,7 +467,7 @@ pub(super) fn resolve_tree(
             }
         }
         if focused {
-            if is_button || is_list {
+            if is_button || is_list || is_choice {
                 resolved.outline.width = 2.0;
             }
             if is_input {
@@ -438,10 +485,10 @@ pub(super) fn resolve_tree(
             }
         }
         if disabled {
-            if is_button || is_input || is_item {
+            if is_button || is_input || is_item || is_choice {
                 resolved.surface.fill.a *= 0.5;
             }
-            if is_item {
+            if is_item || is_choice {
                 resolved.text = theme.subtext;
             }
             for sheet in &layers {
@@ -478,7 +525,11 @@ pub(super) fn resolve_tree(
                 theme,
                 state,
                 Some(&resolved),
-                if is_list { Some(widget) } else { list },
+                if is_list || matches!(widget.kind, Kind::RadioGroup { .. }) {
+                    Some(widget)
+                } else {
+                    list
+                },
                 out,
             )?;
         }

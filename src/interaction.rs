@@ -49,6 +49,18 @@ impl UiView {
                 }
                 | Kind::ListItem {
                     disabled: false, ..
+                }
+                | Kind::Checkbox {
+                    disabled: false, ..
+                }
+                | Kind::Switch {
+                    disabled: false, ..
+                }
+                | Kind::RadioOption {
+                    disabled: false, ..
+                }
+                | Kind::RadioGroup {
+                    disabled: false, ..
                 } if !inherited_disabled => {
                     focusable.insert(widget.key.clone());
                 }
@@ -70,11 +82,17 @@ impl UiView {
                     inputs,
                     scrolls,
                     focusable,
-                    inherited_disabled || matches!(widget.kind, Kind::List { disabled: true, .. }),
+                    inherited_disabled
+                        || matches!(
+                            widget.kind,
+                            Kind::List { disabled: true, .. }
+                                | Kind::RadioGroup { disabled: true, .. }
+                        ),
                 );
             }
         }
         self.sync_lists();
+        self.sync_forms();
         let mut inputs = HashSet::new();
         let mut scrolls = HashSet::new();
         let mut focusable = HashSet::new();
@@ -104,6 +122,7 @@ impl UiView {
             .is_some_and(|key| !focusable.contains(key))
         {
             self.state.pressed = None;
+            self.state.choice_space = None;
             self.state.dragging = false;
         }
     }
@@ -157,17 +176,19 @@ impl UiView {
             return out;
         }
         let hit = |position: Point| {
-            scene
-                .controls
-                .iter()
-                .rev()
-                .find(|c| !c.disabled && c.rect.contains(position) && c.clip.contains(position))
+            scene.controls.iter().rev().find(|c| {
+                !c.disabled
+                    && !matches!(c.kind, ControlKind::RadioGroup)
+                    && c.rect.contains(position)
+                    && c.clip.contains(position)
+            })
         };
         match event {
             InputEvent::WindowFocus(value) => {
                 self.state.window_focused = value;
                 if !value {
                     self.state.pressed = None;
+                    self.state.choice_space = None;
                     self.state.dragging = false;
                     self.state.pending_paste = None;
                     for editor in self.state.editors.values_mut() {
@@ -176,6 +197,7 @@ impl UiView {
                 }
             }
             InputEvent::PointerDown { position, shift } => {
+                self.state.choice_space = None;
                 let control = hit(position);
                 let focus = control.map(|c| match &c.kind {
                     ControlKind::ListItem { list, .. } => list.clone(),
@@ -217,18 +239,23 @@ impl UiView {
             }
             InputEvent::PointerUp { position } => {
                 if !self.state.dragging
+                    && self.state.choice_space.is_none()
                     && let Some(control) = hit(position)
                     && self.state.pressed.as_deref() == Some(control.key.as_str())
-                    && let ControlKind::Button(action) | ControlKind::ListItem { action, .. } =
-                        &control.kind
                 {
-                    out.push(UiEvent::Activate(action.clone()));
+                    match &control.kind {
+                        ControlKind::Button(action) | ControlKind::ListItem { action, .. } => {
+                            out.push(UiEvent::Activate(action.clone()))
+                        }
+                        _ => self.activate_choice(control, &mut out),
+                    }
                 }
                 self.state.pressed = None;
                 self.state.dragging = false;
             }
             InputEvent::PointerCancel => {
                 self.state.pressed = None;
+                self.state.choice_space = None;
                 self.state.dragging = false;
             }
             InputEvent::Wheel { position, delta } => {
@@ -260,15 +287,23 @@ impl UiView {
                 modifiers,
             } => {
                 if !modifiers.control && !modifiers.alt {
-                    let controls: Vec<_> = scene
-                        .controls
-                        .iter()
-                        .filter(|c| !c.disabled && !matches!(c.kind, ControlKind::ListItem { .. }))
-                        .collect();
+                    let controls = forms::tab_stops(&scene.controls, &self.state);
                     if !controls.is_empty() {
+                        let group = scene
+                            .controls
+                            .iter()
+                            .find(|c| self.state.focus.as_deref() == Some(c.key.as_str()))
+                            .and_then(|c| {
+                                if let ControlKind::RadioOption { group } = &c.kind {
+                                    Some(group)
+                                } else {
+                                    None
+                                }
+                            });
                         let current = controls
                             .iter()
-                            .position(|c| self.state.focus.as_deref() == Some(c.key.as_str()));
+                            .position(|c| self.state.focus.as_deref() == Some(c.key.as_str())
+                                || matches!(&c.kind, ControlKind::RadioOption { group: owner } if Some(owner) == group));
                         let index = match (current, modifiers.shift) {
                             (Some(0), true) | (None, true) => controls.len() - 1,
                             (Some(i), true) => i - 1,
@@ -282,6 +317,19 @@ impl UiView {
             InputEvent::KeyDown {
                 key: Key::Escape, ..
             } => {
+                if self.state.choice_space.take().is_some()
+                    || scene.controls.iter().any(|c| {
+                        self.state.pressed.as_deref() == Some(c.key.as_str())
+                            && matches!(
+                                c.kind,
+                                ControlKind::Checkbox
+                                    | ControlKind::Switch
+                                    | ControlKind::RadioOption { .. }
+                            )
+                    })
+                {
+                    self.state.pressed = None;
+                }
                 if let Some(editor) = self
                     .state
                     .focus
@@ -301,6 +349,20 @@ impl UiView {
                     .find(|c| !c.disabled && self.state.focus.as_deref() == Some(c.key.as_str()))
                 {
                     match &control.kind {
+                        ControlKind::Checkbox
+                        | ControlKind::Switch
+                        | ControlKind::RadioOption { .. }
+                            if !modifiers.control && !modifiers.alt =>
+                        {
+                            if key == Key::Space {
+                                if self.state.choice_space.is_none() {
+                                    self.state.choice_space = Some(control.key.clone());
+                                    self.state.pressed = Some(control.key.clone());
+                                }
+                            } else if let ControlKind::RadioOption { group } = &control.kind {
+                                self.navigate_radio(group, &control.key, key, &scene, &mut out);
+                            }
+                        }
                         ControlKind::Button(action) if !modifiers.control && !modifiers.alt => {
                             match key {
                                 Key::Enter => out.push(UiEvent::Activate(action.clone())),
@@ -335,13 +397,17 @@ impl UiView {
                 }
             }
             InputEvent::KeyUp { key: Key::Space } => {
+                let choice = self.state.choice_space.take();
                 if let Some(control) = scene.controls.iter().find(|c| {
                     !c.disabled
                         && self.state.focus.as_deref() == Some(c.key.as_str())
                         && self.state.pressed.as_deref() == Some(c.key.as_str())
-                }) && let ControlKind::Button(action) = &control.kind
-                {
-                    out.push(UiEvent::Activate(action.clone()));
+                }) {
+                    if let ControlKind::Button(action) = &control.kind {
+                        out.push(UiEvent::Activate(action.clone()));
+                    } else if choice.as_deref() == Some(control.key.as_str()) {
+                        self.activate_choice(control, &mut out);
+                    }
                 }
                 self.state.pressed = None;
             }
@@ -456,6 +522,7 @@ impl UiView {
                 editor.preedit = None;
             }
             self.state.focus = key;
+            self.state.choice_space = None;
             self.state.pending_paste = None;
             self.state.pressed = None;
             self.state.dragging = false;
@@ -619,7 +686,13 @@ impl UiView {
         let mut out = Vec::new();
         match action {
             AccessibleAction::Focus(key) => {
-                if scene.controls.iter().any(|c| c.key == key && !c.disabled) {
+                if scene
+                    .controls
+                    .iter()
+                    .any(|c| c.key == key && matches!(c.kind, ControlKind::RadioGroup))
+                {
+                    out.extend(self.focus(&key).unwrap_or_default());
+                } else if scene.controls.iter().any(|c| c.key == key && !c.disabled) {
                     if let Some(control) = scene.controls.iter().find(|c| c.key == key)
                         && let ControlKind::ListItem { list, .. } = &control.kind
                     {
@@ -631,14 +704,17 @@ impl UiView {
                 }
             }
             AccessibleAction::Activate(key) => {
-                if let Some(control) = scene.controls.iter().find(|c| c.key == key && !c.disabled)
-                    && let ControlKind::Button(action) | ControlKind::ListItem { action, .. } =
+                if let Some(control) = scene.controls.iter().find(|c| c.key == key && !c.disabled) {
+                    if let ControlKind::Button(action) | ControlKind::ListItem { action, .. } =
                         &control.kind
-                {
-                    if let ControlKind::ListItem { list, .. } = &control.kind {
-                        let _ = self.select_in(list, Some(&key), &scene, &mut out);
+                    {
+                        if let ControlKind::ListItem { list, .. } = &control.kind {
+                            let _ = self.select_in(list, Some(&key), &scene, &mut out);
+                        }
+                        out.push(UiEvent::Activate(action.clone()));
+                    } else {
+                        self.activate_choice(control, &mut out);
                     }
-                    out.push(UiEvent::Activate(action.clone()));
                 }
             }
             AccessibleAction::SetValue { key, value } => {

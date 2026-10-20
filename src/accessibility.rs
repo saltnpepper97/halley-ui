@@ -66,6 +66,10 @@ impl AccessibilityTree {
                 SemanticRole::Menu => Role::Menu,
                 SemanticRole::MenuItem => Role::MenuItem,
                 SemanticRole::Dialog => Role::Dialog,
+                SemanticRole::Checkbox => Role::CheckBox,
+                SemanticRole::Switch => Role::Switch,
+                SemanticRole::RadioGroup => Role::RadioGroup,
+                SemanticRole::RadioOption => Role::RadioButton,
             };
             let mut node = Node::new(role);
             node.set_bounds(bounds(semantic.rect));
@@ -95,11 +99,19 @@ impl AccessibilityTree {
             if let Some(selected) = semantic.selected {
                 node.set_selected(selected);
             }
+            if let Some(checked) = semantic.checked {
+                node.set_toggled(checked.into());
+            }
             if let Some(key) = &semantic.active_descendant {
                 node.set_active_descendant(self.id(key, 0));
             }
             match semantic.role {
-                SemanticRole::Button | SemanticRole::ListItem | SemanticRole::MenuItem => {
+                SemanticRole::Button
+                | SemanticRole::ListItem
+                | SemanticRole::MenuItem
+                | SemanticRole::Checkbox
+                | SemanticRole::Switch
+                | SemanticRole::RadioOption => {
                     if semantic.label.is_none()
                         && let Some(value) = &semantic.value
                     {

@@ -78,6 +78,14 @@ pub enum InputEvent {
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiEvent {
     Activate(ActionId),
+    CheckedChanged {
+        key: String,
+        checked: bool,
+    },
+    RadioChanged {
+        key: String,
+        selected: Option<String>,
+    },
     TextChanged {
         key: String,
         value: String,
@@ -238,6 +246,9 @@ fn next_word(text: &str, cursor: usize) -> usize {
 }
 #[derive(Default)]
 pub(crate) struct State {
+    pub checked: HashMap<String, bool>,
+    pub radios: HashMap<String, Option<String>>,
+    pub choice_space: Option<String>,
     pub editors: HashMap<String, Editor>,
     pub scroll: HashMap<String, Point>,
     pub lists: HashMap<String, Option<String>>,
@@ -286,6 +297,22 @@ impl State {
             lists ^= h.finish();
         }
         lists.hash(&mut hash);
+        let mut checks = 0u64;
+        for (key, checked) in &self.checked {
+            let mut h = DefaultHasher::new();
+            key.hash(&mut h);
+            checked.hash(&mut h);
+            checks ^= h.finish();
+        }
+        checks.hash(&mut hash);
+        let mut radios = 0u64;
+        for (key, selected) in &self.radios {
+            let mut h = DefaultHasher::new();
+            key.hash(&mut h);
+            selected.hash(&mut h);
+            radios ^= h.finish();
+        }
+        radios.hash(&mut hash);
         hash.finish()
     }
 }

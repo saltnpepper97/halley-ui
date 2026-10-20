@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add retained Checkbox, Switch, and RadioGroup/RadioOption controls with silent
+  programmatic updates, user value-change events, and disabled values.
+- Add Space activation, one Tab stop per radio group, wrapping arrow navigation,
+  clipping/focus reveal, capture cancellation, and overlay integration.
+- Add form metrics, component styling, checked accessibility state, documentation,
+  and interaction/rendering regressions. See the form guide for API additions.
+
 - Add renderer-neutral `UiStack`, popovers, menus, and modal dialogs with anchored
   flip/clamp placement, constrained scrolling, scoped input, and focus restoration.
 - Add keyboard/hover menu selection, dismissal policies, modal backdrops, and
