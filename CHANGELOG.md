@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Document and package the toolkit/application/SDK ownership guide: reusable UI
+  stays here, application decisions stay with consumers, and compositor control
+  crosses the public SDK. No toolkit API or runtime behavior changes.
+
 - Optimize development demo rendering, reuse unchanged frames, and avoid redraws
   for pointer motion that does not change visual state. Run checks on a worker
   thread and add repeatable warm-frame benchmarks and redraw regressions.

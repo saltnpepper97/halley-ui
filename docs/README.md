@@ -33,3 +33,6 @@ for interactive light/dark review and repeatable settings checks. Historical che
 are in [verification](verification/README.md), with the deferred GPU migration in
 [reintegration](reintegration/README.md).
 These repository-only archives are not shipped as supported backends.
+
+See [toolkit and application boundaries](architecture.md) for ownership of UI,
+host transport, application logic, and compositor integration.

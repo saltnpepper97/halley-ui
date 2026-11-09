@@ -3,6 +3,8 @@
 //!
 //! Layout, text, and software rendering work without a Wayland connection or GPU.
 //! The host retains its renderer, Wayland connection, buffers, and event loop.
+//! Applications interpret UI events and call compositor APIs themselves. This
+//! crate owns neither application search/action policy nor compositor control.
 
 #[cfg(feature = "accessibility")]
 pub mod accessibility;

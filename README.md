@@ -3,7 +3,8 @@
 A small Rust UI toolkit for the Halley ecosystem:
 [Taffy](https://github.com/DioxusLabs/taffy) layout, components, Unicode text
 editing, focus, scrolling, shared text rendering, and direct software drawing.
-The toolkit is independent of Smithay and Wayland.
+The toolkit is independent of Smithay and Wayland. See the
+[ownership guide](docs/architecture.md) for toolkit, host, application, and SDK boundaries.
 
 ## Quick start
 
